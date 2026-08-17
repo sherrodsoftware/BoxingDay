@@ -115,8 +115,3 @@ extended attributes supplied by the app developer.
 ## License
 
 Boxing Day is available under the [MIT License](LICENSE.md).
-
-## Contributing
-
-Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before
-opening an issue or pull request.
