@@ -1,9 +1,16 @@
-# Boxing Day
+<h1>
+  <img src="docs/images/boxing-day-icon.png" alt="Boxing Day icon" width="48" />
+  Boxing Day
+</h1>
 
 A small open-source macOS utility that turns an app into a Jamf Pro–ready installer
 package. Drop in a `.app`, `.dmg`, or `.zip`; get back a `.pkg` that installs
 the app to `/Applications` with the correct ownership and permissions. You can
 also select an existing `.pkg` for upload to Jamf Pro.
+
+<p align="center">
+  <img src="docs/images/boxing-day-main-window.png" alt="Boxing Day main window" width="720" />
+</p>
 
 ## What it does
 
