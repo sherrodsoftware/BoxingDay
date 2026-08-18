@@ -13,4 +13,4 @@ jobs:
       - name: Run tests
         run: >-
           xcodebuild -project "Boxing Day.xcodeproj" -scheme "Boxing Day"
-          -configuration Debug test
+          -configuration Debug CODE_SIGNING_ALLOWED=NO test
