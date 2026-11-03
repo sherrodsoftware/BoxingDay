@@ -383,11 +383,16 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(message)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("Save Error as Text…") {
-                        ErrorReportExporter.save(
-                            message: message,
-                            suggestedFileName: "Boxing Day Build Error.txt"
-                        )
+                    HStack {
+                        Button("Copy Error") {
+                            ErrorReportExporter.copy(message: message)
+                        }
+                        Button("Save Error as Text…") {
+                            ErrorReportExporter.save(
+                                message: message,
+                                suggestedFileName: "Boxing Day Build Error.txt"
+                            )
+                        }
                     }
                 }
                 Spacer(minLength: 0)

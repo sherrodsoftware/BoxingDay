@@ -23,6 +23,10 @@ struct JamfUploadView: View {
     @State private var uploadProgress = 0.0
     @State private var uploadResult: JamfPackageUploadResult?
     @State private var uploadError: String?
+    @State private var uploadWasCancelled = false
+    /// A filename that now has a Jamf Pro package record from an
+    /// unfinished upload. Uploading it again would fail the duplicate check.
+    @State private var fileNameInUse: String?
     @State private var activityMessages: [String] = []
     @State private var uploadTask: Task<Void, Never>?
 
@@ -52,6 +56,9 @@ struct JamfUploadView: View {
             && options.validationError == nil
             && !isUploading
             && uploadResult == nil
+            && fileNameInUse != fileName.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
     }
 
     var body: some View {
@@ -207,19 +214,26 @@ struct JamfUploadView: View {
                 }
 
                 if let uploadError {
-                    Section("Upload Failed") {
+                    Section(uploadWasCancelled ? "Upload Cancelled" : "Upload Failed") {
                         Label(
                             uploadError,
-                            systemImage: "exclamationmark.triangle.fill"
+                            systemImage: uploadWasCancelled
+                                ? "stop.circle.fill"
+                                : "exclamationmark.triangle.fill"
                         )
-                        .foregroundStyle(.red)
+                        .foregroundStyle(uploadWasCancelled ? .orange : .red)
                         .fixedSize(horizontal: false, vertical: true)
 
-                        Button("Save Error as Text…") {
-                            ErrorReportExporter.save(
-                                message: uploadError,
-                                suggestedFileName: "Boxing Day Jamf Upload Error.txt"
-                            )
+                        HStack {
+                            Button("Copy Error") {
+                                ErrorReportExporter.copy(message: uploadError)
+                            }
+                            Button("Save Error as Text…") {
+                                ErrorReportExporter.save(
+                                    message: uploadError,
+                                    suggestedFileName: "Boxing Day Jamf Upload Error.txt"
+                                )
+                            }
                         }
                     }
                 }
@@ -288,7 +302,9 @@ struct JamfUploadView: View {
             return "checkmark.circle.fill"
         }
         if uploadError != nil && index == activityMessages.indices.last {
-            return "exclamationmark.triangle.fill"
+            return uploadWasCancelled
+                ? "stop.circle.fill"
+                : "exclamationmark.triangle.fill"
         }
         if isUploading && index == activityMessages.indices.last {
             return "arrow.right.circle.fill"
@@ -298,7 +314,7 @@ struct JamfUploadView: View {
 
     private func activityColor(at index: Int) -> Color {
         if uploadError != nil && index == activityMessages.indices.last {
-            return .red
+            return uploadWasCancelled ? .orange : .red
         }
         if isUploading && index == activityMessages.indices.last {
             return .accentColor
@@ -383,6 +399,7 @@ struct JamfUploadView: View {
 
         isUploading = true
         uploadError = nil
+        uploadWasCancelled = false
         uploadResult = nil
         uploadProgress = 0
         uploadStage = .authenticating
@@ -408,15 +425,33 @@ struct JamfUploadView: View {
                     "Jamf Pro reported the package \(result.cloudTransferStatus.lowercased())."
                 )
             } catch where Task.isCancelled {
+                uploadWasCancelled = true
                 switch error as? JamfClientError {
-                case .packageRecordCreated, .packageUploadedStatusUnknown:
-                    // A package record exists in Jamf Pro, so explain it.
-                    uploadError = "Upload cancelled. \(error.localizedDescription)"
+                case .packageRecordCreated(let packageID, _):
+                    fileNameInUse = options.fileName
+                    uploadError = """
+                    Upload cancelled. Jamf Pro package record \(packageID) was \
+                    created without a file. Delete it in Jamf Pro, or choose a \
+                    different filename, before uploading again.
+                    """
+                case .packageUploadedStatusUnknown(let packageID, _):
+                    fileNameInUse = options.fileName
+                    uploadError = """
+                    Stopped waiting for Jamf Pro. The file was already uploaded \
+                    as package ID \(packageID); check its status in Jamf Pro.
+                    """
                 default:
                     uploadError = "Upload cancelled. Nothing was added to Jamf Pro."
                 }
-                activityMessages.append("Upload cancelled.")
+                activityMessages.append("Upload cancelled")
             } catch {
+                switch error as? JamfClientError {
+                case .packageRecordCreated, .packageUploadedStatusUnknown:
+                    // The record exists, so this filename is now taken.
+                    fileNameInUse = options.fileName
+                default:
+                    break
+                }
                 uploadError = error.localizedDescription
                 activityMessages.append("Boxing Day encountered an error.")
             }

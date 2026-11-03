@@ -17,6 +17,12 @@ enum ErrorReportExporter {
         }
     }
 
+    static func copy(message: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(message, forType: .string)
+    }
+
     static func text(for message: String) -> String {
         message.hasSuffix("\n") ? message : message + "\n"
     }
