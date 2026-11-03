@@ -265,7 +265,7 @@ struct JamfUploadView: View {
             }
             .padding(16)
         }
-        .frame(width: 580, height: 650)
+        .frame(minWidth: 580, idealWidth: 580, minHeight: 520, idealHeight: 650)
         .interactiveDismissDisabled(isUploading)
         .onChange(of: activityMessages) { _, messages in
             // The activity list is the upload's progress, so read each new
@@ -386,17 +386,9 @@ struct JamfUploadView: View {
                     clientSecret: clientSecret
                 ).categories()
                 let allCategories = [JamfCategory.noCategory] + loaded
-                let saved = JamfPreferences.load()
-                let preferred = allCategories.first {
-                    $0.id == saved.defaultCategoryID
-                        && $0.name.caseInsensitiveCompare(
-                            saved.defaultCategoryName
-                        ) == .orderedSame
-                } ?? allCategories.first {
-                    $0.name.caseInsensitiveCompare(
-                        saved.defaultCategoryName
-                    ) == .orderedSame
-                }
+                let preferred = JamfPreferences.preferredCategory(
+                    in: allCategories
+                )
 
                 categories = allCategories
                 categoryID = preferred?.id ?? JamfCategory.noCategory.id

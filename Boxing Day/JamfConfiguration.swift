@@ -159,6 +159,21 @@ enum JamfPreferences {
         defaults.set(configuration.clientID, forKey: clientIDKey)
     }
 
+    /// The saved default category within `categories`, matched by ID and
+    /// name, then by name alone in case the category was recreated.
+    static func preferredCategory(
+        in categories: [JamfCategory]
+    ) -> JamfCategory? {
+        let saved = load()
+        let nameMatches: (JamfCategory) -> Bool = {
+            $0.name.caseInsensitiveCompare(saved.defaultCategoryName)
+                == .orderedSame
+        }
+        return categories.first {
+            $0.id == saved.defaultCategoryID && nameMatches($0)
+        } ?? categories.first(where: nameMatches)
+    }
+
     static func saveDefaultCategory(_ category: JamfCategory) {
         let defaults = UserDefaults.standard
         defaults.set(category.id, forKey: defaultCategoryIDKey)

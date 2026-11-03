@@ -349,7 +349,8 @@ enum AppResolver {
         return processID
     }
 
-    private static func processIsRunning(_ processID: Int32) -> Bool {
+    /// Whether a process exists, including one owned by another user.
+    static func processIsRunning(_ processID: Int32) -> Bool {
         if kill(processID, 0) == 0 {
             return true
         }

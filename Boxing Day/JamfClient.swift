@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 struct JamfConnectionSummary: Equatable {
@@ -141,7 +140,7 @@ struct JamfClient {
         for candidate in contents {
             guard let ownerPID = uploadBodyOwnerPID(candidate),
                   ownerPID != currentPID,
-                  !processIsRunning(ownerPID) else {
+                  !AppResolver.processIsRunning(ownerPID) else {
                 continue
             }
             try? fileManager.removeItem(at: candidate)
@@ -798,13 +797,6 @@ struct JamfClient {
             return nil
         }
         return processID
-    }
-
-    private static func processIsRunning(_ processID: Int32) -> Bool {
-        if kill(processID, 0) == 0 {
-            return true
-        }
-        return errno == EPERM
     }
 
     private static func findString(

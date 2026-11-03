@@ -149,7 +149,8 @@ struct JamfSettingsView: View {
 
         }
         .formStyle(.grouped)
-        .frame(width: 540, height: 620)
+        .frame(width: 540)
+        .frame(minHeight: 620)
         .onAppear {
             loadSecretOnce()
             loadCategoriesIfPossible()
@@ -308,17 +309,9 @@ struct JamfSettingsView: View {
                     clientSecret: clientSecret
                 ).categories()
                 let allCategories = [JamfCategory.noCategory] + loaded
-                let saved = JamfPreferences.load()
-                let preferred = allCategories.first {
-                    $0.id == saved.defaultCategoryID
-                        && $0.name.caseInsensitiveCompare(
-                            saved.defaultCategoryName
-                        ) == .orderedSame
-                } ?? allCategories.first {
-                    $0.name.caseInsensitiveCompare(
-                        saved.defaultCategoryName
-                    ) == .orderedSame
-                } ?? JamfCategory.noCategory
+                let preferred = JamfPreferences.preferredCategory(
+                    in: allCategories
+                ) ?? JamfCategory.noCategory
 
                 categories = allCategories
                 defaultCategoryID = preferred.id

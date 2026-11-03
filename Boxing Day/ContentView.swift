@@ -103,7 +103,7 @@ struct ContentView: View {
         ScrollView {
             VStack(spacing: 18) {
                 VStack(spacing: 4) {
-                    Text("App → .pkg")
+                    Text("Build an Installer Package")
                         .font(.title2)
                         .bold()
                     Text("Choose an app, disk image, or ZIP archive to begin.")
@@ -193,14 +193,14 @@ struct ContentView: View {
                     style: StrokeStyle(lineWidth: 2, dash: [6])
                 )
                 .foregroundStyle(
-                    isTargeted ? Color.accentColor : Color.secondary.opacity(0.5)
+                    isTargeted ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary)
                 )
                 .background(
                     RoundedRectangle(cornerRadius: 12)
                         .fill(
                             isTargeted
-                                ? Color.accentColor.opacity(0.08)
-                                : Color.secondary.opacity(0.04)
+                                ? AnyShapeStyle(Color.accentColor.opacity(0.08))
+                                : AnyShapeStyle(.quinary)
                         )
                 )
 
@@ -266,7 +266,7 @@ struct ContentView: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color.secondary.opacity(0.08))
+                .fill(.quinary)
         )
     }
 
@@ -290,7 +290,7 @@ struct ContentView: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color.secondary.opacity(0.08))
+                .fill(.quinary)
         )
     }
 
@@ -339,7 +339,7 @@ struct ContentView: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.secondary.opacity(0.25))
+                .stroke(.separator)
         )
     }
 
@@ -353,9 +353,6 @@ struct ContentView: View {
 
             HStack {
                 Spacer()
-                Button("Build .pkg…") {}
-                    .buttonStyle(.borderedProminent)
-                    .disabled(true)
                 Button("Upload to Jamf Pro…") {
                     showingJamfUpload = true
                 }
@@ -366,7 +363,7 @@ struct ContentView: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.secondary.opacity(0.25))
+                .stroke(.separator)
         )
     }
 
