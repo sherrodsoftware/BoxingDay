@@ -267,6 +267,25 @@ struct JamfUploadView: View {
         }
         .frame(width: 580, height: 650)
         .interactiveDismissDisabled(isUploading)
+        .onChange(of: activityMessages) { _, messages in
+            // The activity list is the upload's progress, so read each new
+            // step aloud; the final result is announced separately.
+            if isUploading, let latest = messages.last {
+                AccessibilityNotification.Announcement(latest).post()
+            }
+        }
+        .onChange(of: uploadResult) { _, result in
+            if result != nil {
+                AccessibilityNotification.Announcement(
+                    "Upload complete. Package is available in Jamf Pro."
+                ).post()
+            }
+        }
+        .onChange(of: uploadError) { _, error in
+            if let error {
+                AccessibilityNotification.Announcement(error).post()
+            }
+        }
         .onAppear {
             loadConnection()
         }

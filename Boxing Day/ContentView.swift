@@ -24,6 +24,22 @@ enum BuildStatus: Equatable {
     case success(PackageCompletionDetails)
     case failure(String)
 
+    /// What VoiceOver announces when the status changes to this value.
+    var accessibilityAnnouncement: String? {
+        switch self {
+        case .idle:
+            return nil
+        case .resolving(let name):
+            return "Reading \(name)"
+        case .building(let name):
+            return "Building package for \(name)"
+        case .success(let details):
+            return "Package created: \(details.url.lastPathComponent)"
+        case .failure(let message):
+            return "Error: \(message)"
+        }
+    }
+
     var isWorking: Bool {
         switch self {
         case .resolving, .building:
@@ -132,6 +148,11 @@ struct ContentView: View {
             discardPendingApp(force: true)
         }
         .focusedSceneValue(\.packageCommands, commandActions)
+        .onChange(of: status) { _, newStatus in
+            if let announcement = newStatus.accessibilityAnnouncement {
+                AccessibilityNotification.Announcement(announcement).post()
+            }
+        }
         .sheet(isPresented: $showingJamfUpload) {
             if let uploadablePackageURL {
                 JamfUploadView(
@@ -187,6 +208,7 @@ struct ContentView: View {
                 Image(systemName: "shippingbox.and.arrow.backward")
                     .font(.system(size: 32))
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 Text("Drop a .app, .dmg, .zip, or .pkg here")
                     .foregroundStyle(.secondary)
                 Button("Choose File…") {
@@ -202,6 +224,11 @@ struct ContentView: View {
             return !status.isWorking
         }
         .allowsHitTesting(!status.isWorking)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Drop zone for an app, disk image, ZIP archive, or package")
+        .accessibilityAction(named: "Choose File") {
+            chooseFile()
+        }
     }
 
     private func selectedAppCard(_ app: SelectedAppDetails) -> some View {

@@ -1,9 +1,13 @@
+import AppKit
 import SwiftUI
 
 @main
-struct AppToPkgApp: App {
+struct BoxingDayApp: App {
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
+
     var body: some Scene {
-        WindowGroup {
+        // Boxing Day works on one item at a time, so it has a single window.
+        Window("Boxing Day", id: "main") {
             ContentView()
                 .frame(minWidth: 520, minHeight: 560)
         }
@@ -15,5 +19,14 @@ struct AppToPkgApp: App {
         Settings {
             JamfSettingsView()
         }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Closing the only window quits, as with other single-window utilities.
+    func applicationShouldTerminateAfterLastWindowClosed(
+        _ sender: NSApplication
+    ) -> Bool {
+        true
     }
 }
