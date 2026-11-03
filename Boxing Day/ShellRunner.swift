@@ -45,8 +45,17 @@ enum ShellRunner {
             throw ShellError.launchFailed(error.localizedDescription)
         }
 
+        // Drain stderr concurrently so a child that fills the stderr pipe
+        // cannot block while we wait on stdout.
+        var stderrData = Data()
+        let stderrGroup = DispatchGroup()
+        stderrGroup.enter()
+        DispatchQueue.global(qos: .utility).async {
+            stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            stderrGroup.leave()
+        }
         let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        stderrGroup.wait()
         process.waitUntilExit()
 
         let result = ShellResult(

@@ -242,6 +242,12 @@ struct JamfClient {
         stageChanged: @escaping (JamfUploadStage) -> Void,
         progressChanged: @escaping (Double) -> Void
     ) async throws -> JamfPackageUploadResult {
+        // Use the same trimmed filename for the duplicate check, the package
+        // record, and the uploaded file so they always agree.
+        var options = options
+        options.fileName = options.fileName.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
         let validatedConfiguration = try configuration.validated()
         guard !clientSecret.isEmpty else {
             throw JamfConfigurationError.missingClientSecret

@@ -208,13 +208,16 @@ enum AppResolver {
             try FileManager.default.copyItem(at: appURL, to: copiedApp)
             return (.app(copiedApp), workDir)
         } catch {
-            if !isMounted {
-                _ = try? ShellRunner.run(
-                    "/usr/bin/hdiutil",
-                    ["detach", mountPoint.path, "-quiet", "-force"]
-                )
+            // Detach before removing the workspace so removal never reaches
+            // into a live mount (a writable image would lose its contents).
+            let detached = (try? ShellRunner.run(
+                "/usr/bin/hdiutil",
+                ["detach", mountPoint.path, "-quiet", "-force"]
+            )) != nil
+            if detached || !isMounted {
+                isMounted = false
+                removeWorkDir(at: workDir)
             }
-            removeWorkDir(at: workDir)
             if error is AppResolverError {
                 throw error
             }
