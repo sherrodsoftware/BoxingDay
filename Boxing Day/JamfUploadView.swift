@@ -231,6 +231,7 @@ struct JamfUploadView: View {
                 Button(uploadResult == nil ? "Cancel" : "Done") {
                     dismiss()
                 }
+                .keyboardShortcut(.cancelAction)
                 .disabled(isUploading)
 
                 Spacer()
@@ -239,6 +240,7 @@ struct JamfUploadView: View {
                     startUpload()
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(!canUpload)
             }
             .padding(16)
@@ -250,15 +252,6 @@ struct JamfUploadView: View {
         }
         .onDisappear {
             clientSecret = ""
-        }
-        .onChange(of: categoryID) { _, newValue in
-            guard !isLoadingCategories,
-                  let category = categories.first(
-                    where: { $0.id == newValue }
-                  ) else {
-                return
-            }
-            JamfPreferences.saveDefaultCategory(category)
         }
     }
 

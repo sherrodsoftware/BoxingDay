@@ -8,9 +8,7 @@ enum ErrorReportExporter {
         savePanel.canCreateDirectories = true
         savePanel.nameFieldStringValue = suggestedFileName
 
-        savePanel.begin { response in
-            guard response == .OK, let url = savePanel.url else { return }
-
+        savePanel.presentAttachedToKeyWindow { url in
             do {
                 try text(for: message).write(to: url, atomically: true, encoding: .utf8)
             } catch {
@@ -28,6 +26,27 @@ enum ErrorReportExporter {
         alert.alertStyle = .warning
         alert.messageText = "Could Not Save Error Report"
         alert.informativeText = error.localizedDescription
-        alert.runModal()
+        if let window = NSApp.keyWindow {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+    }
+}
+
+extension NSSavePanel {
+    /// Presents the panel as a sheet on the key window, so only that window
+    /// is blocked, and calls `completion` with the chosen URL. Falls back to
+    /// a standalone panel when there is no key window.
+    func presentAttachedToKeyWindow(completion: @escaping (URL) -> Void) {
+        let handler: (NSApplication.ModalResponse) -> Void = { [self] response in
+            guard response == .OK, let url else { return }
+            completion(url)
+        }
+        if let window = NSApp.keyWindow {
+            beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            begin(completionHandler: handler)
+        }
     }
 }

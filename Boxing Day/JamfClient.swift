@@ -239,8 +239,8 @@ struct JamfClient {
     func uploadPackage(
         at packageURL: URL,
         options: JamfPackageUploadOptions,
-        stageChanged: @escaping (JamfUploadStage) -> Void,
-        progressChanged: @escaping (Double) -> Void
+        stageChanged: @escaping @MainActor (JamfUploadStage) -> Void,
+        progressChanged: @escaping @MainActor (Double) -> Void
     ) async throws -> JamfPackageUploadResult {
         // Use the same trimmed filename for the duplicate check, the package
         // record, and the uploaded file so they always agree.
@@ -261,12 +261,12 @@ struct JamfClient {
             )
         }
 
-        stageChanged(.authenticating)
+        await stageChanged(.authenticating)
         let token = try await accessToken(
             configuration: validatedConfiguration
         )
 
-        stageChanged(.checkingForDuplicate)
+        await stageChanged(.checkingForDuplicate)
         if let existingID = try await existingPackageID(
             fileName: options.fileName,
             token: token,
@@ -278,7 +278,7 @@ struct JamfClient {
             )
         }
 
-        stageChanged(.creatingRecord)
+        await stageChanged(.creatingRecord)
         let packageID = try await createPackageRecord(
             options: options,
             token: token,
@@ -286,7 +286,7 @@ struct JamfClient {
         )
 
         do {
-            stageChanged(.preparingUpload)
+            await stageChanged(.preparingUpload)
             let multipart = try await Task.detached(priority: .utility) {
                 try Self.createMultipartBody(
                     packageURL: packageURL,
@@ -297,8 +297,8 @@ struct JamfClient {
                 try? FileManager.default.removeItem(at: multipart.url)
             }
 
-            stageChanged(.uploading)
-            progressChanged(0)
+            await stageChanged(.uploading)
+            await progressChanged(0)
             try await uploadMultipartBody(
                 multipart,
                 packageID: packageID,
@@ -306,7 +306,7 @@ struct JamfClient {
                 configuration: validatedConfiguration,
                 progressChanged: progressChanged
             )
-            progressChanged(1)
+            await progressChanged(1)
         } catch {
             throw JamfClientError.packageRecordCreated(
                 packageID: packageID,
@@ -389,7 +389,7 @@ struct JamfClient {
         packageID: String,
         token: String,
         configuration: JamfConfiguration,
-        progressChanged: @escaping (Double) -> Void
+        progressChanged: @escaping @MainActor (Double) -> Void
     ) async throws {
         var request = URLRequest(
             url: try configuration.apiURL(
@@ -419,7 +419,7 @@ struct JamfClient {
         packageID: String,
         token: String,
         configuration: JamfConfiguration,
-        stageChanged: @escaping (JamfUploadStage) -> Void
+        stageChanged: @escaping @MainActor (JamfUploadStage) -> Void
     ) async throws -> String {
         var activeToken = token
         var refreshedAuthentication = false
@@ -435,7 +435,7 @@ struct JamfClient {
             } catch JamfClientError.authenticationRejected
                 where !refreshedAuthentication {
                 refreshedAuthentication = true
-                stageChanged(.refreshingAuthentication)
+                await stageChanged(.refreshingAuthentication)
                 activeToken = try await accessToken(
                     configuration: configuration
                 )
@@ -443,7 +443,7 @@ struct JamfClient {
             }
 
             let status = Self.cloudTransferStatus(from: data)
-            stageChanged(.processingCloud(status))
+            await stageChanged(.processingCloud(status))
 
             if let status {
                 if Self.isSuccessfulCloudTransferStatus(status) {
@@ -524,7 +524,7 @@ struct JamfClient {
     private func upload(
         request: URLRequest,
         bodyURL: URL,
-        progressChanged: @escaping (Double) -> Void
+        progressChanged: @escaping @MainActor (Double) -> Void
     ) async throws -> (Data, URLResponse) {
         try await withCheckedThrowingContinuation { continuation in
             let task = session.uploadTask(
@@ -548,7 +548,7 @@ struct JamfClient {
             Task {
                 while task.state == .running {
                     let fraction = task.progress.fractionCompleted
-                    progressChanged(
+                    await progressChanged(
                         fraction.isFinite
                             ? min(max(fraction, 0), 1)
                             : 0

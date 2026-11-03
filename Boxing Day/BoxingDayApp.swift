@@ -8,6 +8,9 @@ struct AppToPkgApp: App {
                 .frame(minWidth: 520, minHeight: 560)
         }
         .defaultSize(width: 560, height: 680)
+        .commands {
+            PackageCommands()
+        }
 
         Settings {
             JamfSettingsView()

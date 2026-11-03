@@ -129,6 +129,7 @@ struct ContentView: View {
         ) { _ in
             discardPendingApp(force: true)
         }
+        .focusedSceneValue(\.packageCommands, commandActions)
         .sheet(isPresented: $showingJamfUpload) {
             if let uploadablePackageURL {
                 JamfUploadView(
@@ -137,6 +138,27 @@ struct ContentView: View {
                 )
             }
         }
+    }
+
+    /// Menu bar actions for this window; a nil action disables its menu item.
+    private var commandActions: PackageCommandActions {
+        guard !showingJamfUpload, !status.isWorking else {
+            return PackageCommandActions()
+        }
+        var actions = PackageCommandActions()
+        actions.chooseFile = { chooseFile() }
+        if canBuild {
+            actions.build = { buildPackage() }
+        }
+        if uploadablePackageURL != nil {
+            actions.upload = { showingJamfUpload = true }
+        }
+        if let url = completedPackageURL {
+            actions.reveal = {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        }
+        return actions
     }
 
     // MARK: - File selection
@@ -281,6 +303,7 @@ struct ContentView: View {
                     buildPackage()
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(!canBuild)
             }
         }
@@ -308,6 +331,7 @@ struct ContentView: View {
                     showingJamfUpload = true
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
             }
         }
         .padding(16)
@@ -464,8 +488,9 @@ struct ContentView: View {
         panel.message = "Choose a .app, .dmg, .zip, or .pkg file."
         panel.prompt = "Choose"
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        resolveSelectedFile(at: url)
+        panel.presentAttachedToKeyWindow { url in
+            resolveSelectedFile(at: url)
+        }
     }
 
     private func handleDrop(providers: [NSItemProvider]) {
@@ -534,6 +559,14 @@ struct ContentView: View {
                 } else {
                     resolvedInput = result.input
                 }
+                // codesign --deep can take seconds on large apps, so verify
+                // here rather than on the main thread.
+                var appDefaults: PkgOptions?
+                var appSignatureStatus: AppSignatureStatus?
+                if case .app(let appURL) = resolvedInput {
+                    appDefaults = try? PkgBuilder.defaultOptions(for: appURL)
+                    appSignatureStatus = PkgBuilder.codeSignatureStatus(for: appURL)
+                }
 
                 DispatchQueue.main.async {
                     guard isViewActive else {
@@ -544,8 +577,9 @@ struct ContentView: View {
                     }
                     switch resolvedInput {
                     case .app(let appURL):
-                        let defaults = try? PkgBuilder.defaultOptions(for: appURL)
-                        let signatureStatus = PkgBuilder.codeSignatureStatus(for: appURL)
+                        let defaults = appDefaults
+                        let signatureStatus = appSignatureStatus
+                            ?? .unsignedOrInvalid("The signature was not checked.")
                         let icon = NSWorkspace.shared.icon(forFile: appURL.path)
                         icon.size = NSSize(width: 64, height: 64)
                         pendingAppURL = appURL
@@ -592,7 +626,13 @@ struct ContentView: View {
         panel.nameFieldStringValue = suggestedName
         panel.directoryURL = preferredPackageSaveDirectory()
 
-        guard panel.runModal() == .OK, let outputURL = panel.url else { return }
+        panel.presentAttachedToKeyWindow { outputURL in
+            startBuild(appURL: appURL, workDir: workDir, outputURL: outputURL)
+        }
+    }
+
+    private func startBuild(appURL: URL, workDir: URL, outputURL: URL) {
+        guard canBuild else { return }
         UserDefaults.standard.set(
             outputURL.deletingLastPathComponent().path,
             forKey: Self.lastPackageSaveDirectoryKey

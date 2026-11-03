@@ -91,6 +91,7 @@ struct JamfSettingsView: View {
                         saveAndTest()
                     }
                     .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
                     .disabled(!hasRequiredValues || isTesting)
                 }
             }
