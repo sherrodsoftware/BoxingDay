@@ -3,3 +3,6 @@ DerivedData/
 build/
 xcuserdata/
 *.xcuserstate
+# Release artifacts
+/Boxing Day.app/
+dist/
