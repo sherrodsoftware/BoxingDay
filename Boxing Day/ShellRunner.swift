@@ -1,7 +1,7 @@
 import Foundation
 
 /// Result of running a shell command.
-struct ShellResult {
+nonisolated struct ShellResult {
     let exitCode: Int32
     let stdout: String
     let stderr: String
@@ -9,7 +9,7 @@ struct ShellResult {
     var succeeded: Bool { exitCode == 0 }
 }
 
-enum ShellError: LocalizedError {
+nonisolated enum ShellError: LocalizedError {
     case launchFailed(String)
     case nonZeroExit(command: String, result: ShellResult)
     case cancelled
@@ -30,7 +30,7 @@ enum ShellError: LocalizedError {
 /// Lets another thread stop a sequence of shell commands. Cancelling
 /// terminates the command that is running, and any later run throws
 /// `ShellError.cancelled` without launching.
-final class ShellCancellation: @unchecked Sendable {
+nonisolated final class ShellCancellation: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
     private var runningProcess: Process?
@@ -65,7 +65,13 @@ final class ShellCancellation: @unchecked Sendable {
 
 /// Thin wrapper around Process for running command-line tools like
 /// pkgbuild, hdiutil, ditto, etc. and capturing their output.
-enum ShellRunner {
+/// Holds output read on another queue. The DispatchGroup wait orders the
+/// write before the read, so no lock is needed.
+nonisolated private final class DrainedOutput: @unchecked Sendable {
+    var data = Data()
+}
+
+nonisolated enum ShellRunner {
 
     @discardableResult
     static func run(
@@ -96,15 +102,17 @@ enum ShellRunner {
 
         // Drain stderr concurrently so a child that fills the stderr pipe
         // cannot block while we wait on stdout.
-        var stderrData = Data()
+        let stderrHandle = stderrPipe.fileHandleForReading
+        let stderrBuffer = DrainedOutput()
         let stderrGroup = DispatchGroup()
         stderrGroup.enter()
         DispatchQueue.global(qos: .utility).async {
-            stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            stderrBuffer.data = stderrHandle.readDataToEndOfFile()
             stderrGroup.leave()
         }
         let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         stderrGroup.wait()
+        let stderrData = stderrBuffer.data
         process.waitUntilExit()
 
         let result = ShellResult(

@@ -1,6 +1,6 @@
 import Foundation
 
-struct JamfConfiguration: Equatable {
+nonisolated struct JamfConfiguration: Equatable {
     var serverURL: String
     var clientID: String
 
@@ -101,7 +101,7 @@ struct JamfConfiguration: Equatable {
     }
 }
 
-enum JamfConfigurationError: LocalizedError {
+nonisolated enum JamfConfigurationError: LocalizedError {
     case missingServerURL
     case invalidServerURL
     case missingClientID
@@ -124,14 +124,14 @@ enum JamfConfigurationError: LocalizedError {
     }
 }
 
-struct SavedJamfSettings {
+nonisolated struct SavedJamfSettings {
     var serverURL: String
     var clientID: String
     var defaultCategoryID: String?
     var defaultCategoryName: String
 }
 
-enum JamfPreferences {
+nonisolated enum JamfPreferences {
     static let initialDefaultCategory = JamfCategory.noCategory
 
     private static let serverURLKey = "jamf.serverURL"

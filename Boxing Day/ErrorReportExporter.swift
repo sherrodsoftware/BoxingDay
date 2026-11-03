@@ -2,6 +2,7 @@ import AppKit
 import UniformTypeIdentifiers
 
 enum ErrorReportExporter {
+    @MainActor
     static func save(message: String, suggestedFileName: String) {
         let savePanel = NSSavePanel()
         savePanel.allowedContentTypes = [.plainText]
@@ -17,16 +18,18 @@ enum ErrorReportExporter {
         }
     }
 
+    @MainActor
     static func copy(message: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(message, forType: .string)
     }
 
-    static func text(for message: String) -> String {
+    nonisolated static func text(for message: String) -> String {
         message.hasSuffix("\n") ? message : message + "\n"
     }
 
+    @MainActor
     private static func presentSaveError(_ error: Error) {
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -44,7 +47,9 @@ extension NSSavePanel {
     /// Presents the panel as a sheet on the key window, so only that window
     /// is blocked, and calls `completion` with the chosen URL. Falls back to
     /// a standalone panel when there is no key window.
-    func presentAttachedToKeyWindow(completion: @escaping (URL) -> Void) {
+    func presentAttachedToKeyWindow(
+        completion: @escaping @MainActor (URL) -> Void
+    ) {
         let handler: (NSApplication.ModalResponse) -> Void = { [self] response in
             guard response == .OK, let url else { return }
             completion(url)

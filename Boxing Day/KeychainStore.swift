@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-enum KeychainStore {
+nonisolated enum KeychainStore {
     private static let service = "com.sherrodsoftware.BoxingDay.jamf-api"
     private static let account = "client-secret"
 
@@ -80,7 +80,7 @@ enum KeychainStore {
     }
 }
 
-enum KeychainStoreError: LocalizedError {
+nonisolated enum KeychainStoreError: LocalizedError {
     case invalidSecret
     case operationFailed(OSStatus)
 

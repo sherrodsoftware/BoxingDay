@@ -1,6 +1,6 @@
 import Foundation
 
-enum PackageFieldValidator {
+nonisolated enum PackageFieldValidator {
     static func identifierError(_ identifier: String) -> String? {
         guard !identifier.isEmpty else {
             return "Enter a package identifier."

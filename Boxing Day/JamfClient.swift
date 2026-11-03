@@ -1,19 +1,19 @@
 import Foundation
 
-struct JamfConnectionSummary: Equatable {
+nonisolated struct JamfConnectionSummary: Equatable {
     let server: String
     let cloudDistributionPoint: String
     let cloudUploadReady: Bool
 }
 
-struct JamfCategory: Identifiable, Equatable {
+nonisolated struct JamfCategory: Identifiable, Equatable {
     static let noCategory = JamfCategory(id: "-1", name: "No Category")
 
     let id: String
     let name: String
 }
 
-struct JamfPackageUploadOptions: Equatable {
+nonisolated struct JamfPackageUploadOptions: Equatable {
     var packageName: String
     var fileName: String
     var categoryID: String = "-1"
@@ -45,13 +45,13 @@ struct JamfPackageUploadOptions: Equatable {
     }
 }
 
-struct JamfPackageUploadResult: Equatable {
+nonisolated struct JamfPackageUploadResult: Equatable {
     let packageID: String
     let fileName: String
     let cloudTransferStatus: String
 }
 
-enum JamfUploadStage: Equatable {
+nonisolated enum JamfUploadStage: Equatable {
     case authenticating
     case checkingForDuplicate
     case creatingRecord
@@ -61,7 +61,7 @@ enum JamfUploadStage: Equatable {
     case processingCloud(String?)
 }
 
-enum JamfClientError: LocalizedError {
+nonisolated enum JamfClientError: LocalizedError {
     case invalidResponse
     case authenticationRejected
     case requestFailed(statusCode: Int, message: String?)
@@ -121,7 +121,7 @@ enum JamfClientError: LocalizedError {
     }
 }
 
-struct JamfClient {
+nonisolated struct JamfClient {
     let configuration: JamfConfiguration
     let clientSecret: String
     var session: URLSession = .shared
@@ -834,7 +834,7 @@ struct JamfClient {
     }
 }
 
-private struct OAuthTokenResponse: Decodable {
+nonisolated private struct OAuthTokenResponse: Decodable {
     let accessToken: String
 
     enum CodingKeys: String, CodingKey {
@@ -842,7 +842,7 @@ private struct OAuthTokenResponse: Decodable {
     }
 }
 
-struct JamfCreatePackageRequest: Encodable {
+nonisolated struct JamfCreatePackageRequest: Encodable {
     let packageName: String
     let fileName: String
     let categoryId: String
@@ -877,7 +877,7 @@ struct JamfCreatePackageRequest: Encodable {
 
 /// Holds an upload task so cancellation can reach it, including when
 /// cancellation arrives before the task has been created.
-private final class CancellableUploadTask: @unchecked Sendable {
+nonisolated private final class CancellableUploadTask: @unchecked Sendable {
     private let lock = NSLock()
     private var task: URLSessionTask?
     private var cancelled = false
@@ -899,12 +899,12 @@ private final class CancellableUploadTask: @unchecked Sendable {
     }
 }
 
-private struct MultipartBody {
+nonisolated private struct MultipartBody {
     let url: URL
     let boundary: String
 }
 
-struct JamfCategoryPage: Equatable {
+nonisolated struct JamfCategoryPage: Equatable {
     let categories: [JamfCategory]
     let totalCount: Int
 }

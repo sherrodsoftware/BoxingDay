@@ -3,10 +3,10 @@ import SwiftUI
 /// Actions the focused window offers to the menu bar. A nil action means
 /// the command is unavailable, and its menu item is disabled.
 struct PackageCommandActions {
-    var chooseFile: (() -> Void)?
-    var build: (() -> Void)?
-    var upload: (() -> Void)?
-    var reveal: (() -> Void)?
+    var chooseFile: (@MainActor () -> Void)?
+    var build: (@MainActor () -> Void)?
+    var upload: (@MainActor () -> Void)?
+    var reveal: (@MainActor () -> Void)?
 }
 
 extension FocusedValues {

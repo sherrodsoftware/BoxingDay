@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 
-enum AppResolverError: LocalizedError {
+nonisolated enum AppResolverError: LocalizedError {
     case unsupportedFileType(String)
     case noAppFound(in: String)
     case multipleAppsFound(in: String, apps: [String])
@@ -28,14 +28,14 @@ enum AppResolverError: LocalizedError {
     }
 }
 
-enum ResolvedInput {
+nonisolated enum ResolvedInput {
     case app(URL)
     case package(URL)
 }
 
 /// Resolves dropped files into an app or package, copying archive contents
 /// into a fresh temporary workspace so the original source is never modified.
-enum AppResolver {
+nonisolated enum AppResolver {
 
     /// Resolves a dropped item. A disk image containing one installer package
     /// is returned as a package; all other supported inputs resolve to an app.

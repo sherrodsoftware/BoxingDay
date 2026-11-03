@@ -1,6 +1,6 @@
 import Foundation
 
-struct PkgOptions {
+nonisolated struct PkgOptions {
     var identifier: String
     var version: String
     var installLocation: String = "/Applications"
@@ -9,16 +9,16 @@ struct PkgOptions {
     var signingIdentity: String? = nil
 }
 
-struct PkgBuildResult {
+nonisolated struct PkgBuildResult {
     var signatureWarning: String?
 }
 
-enum AppSignatureStatus: Equatable {
+nonisolated enum AppSignatureStatus: Equatable {
     case valid
     case unsignedOrInvalid(String)
 }
 
-enum PkgBuilderError: LocalizedError {
+nonisolated enum PkgBuilderError: LocalizedError {
     case couldNotReadBundleInfo(String)
     case couldNotPrepareComponentMetadata(String)
     case stagedCodeSignatureInvalid(String)
@@ -44,7 +44,7 @@ enum PkgBuilderError: LocalizedError {
     }
 }
 
-enum PkgBuilder {
+nonisolated enum PkgBuilder {
 
     /// Reads the version of an app enclosed by an existing installer package.
     /// The Installer package's own version is only a fallback: vendors often
