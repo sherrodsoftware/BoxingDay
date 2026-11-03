@@ -296,6 +296,7 @@ struct JamfClient {
             defer {
                 try? FileManager.default.removeItem(at: multipart.url)
             }
+            try Task.checkCancellation()
 
             await stageChanged(.uploading)
             await progressChanged(0)
@@ -526,6 +527,27 @@ struct JamfClient {
         bodyURL: URL,
         progressChanged: @escaping @MainActor (Double) -> Void
     ) async throws -> (Data, URLResponse) {
+        // Completion-handler upload tasks ignore Swift task cancellation,
+        // so forward it to the URLSession task explicitly.
+        let cancellableTask = CancellableUploadTask()
+        return try await withTaskCancellationHandler {
+            try await startUpload(
+                request: request,
+                bodyURL: bodyURL,
+                cancellableTask: cancellableTask,
+                progressChanged: progressChanged
+            )
+        } onCancel: {
+            cancellableTask.cancel()
+        }
+    }
+
+    private func startUpload(
+        request: URLRequest,
+        bodyURL: URL,
+        cancellableTask: CancellableUploadTask,
+        progressChanged: @escaping @MainActor (Double) -> Void
+    ) async throws -> (Data, URLResponse) {
         try await withCheckedThrowingContinuation { continuation in
             let task = session.uploadTask(
                 with: request,
@@ -543,6 +565,7 @@ struct JamfClient {
                 }
                 continuation.resume(returning: (data ?? Data(), response))
             }
+            cancellableTask.set(task)
             task.resume()
 
             Task {
@@ -857,6 +880,30 @@ struct JamfCreatePackageRequest: Encodable {
         info = nil
         notes = options.notes.isEmpty ? nil : options.notes
         priority = options.priority
+    }
+}
+
+/// Holds an upload task so cancellation can reach it, including when
+/// cancellation arrives before the task has been created.
+private final class CancellableUploadTask: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: URLSessionTask?
+    private var cancelled = false
+
+    func set(_ task: URLSessionTask) {
+        let shouldCancel = lock.withLock {
+            self.task = task
+            return cancelled
+        }
+        if shouldCancel { task.cancel() }
+    }
+
+    func cancel() {
+        let task = lock.withLock {
+            cancelled = true
+            return self.task
+        }
+        task?.cancel()
     }
 }
 

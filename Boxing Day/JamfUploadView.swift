@@ -24,6 +24,7 @@ struct JamfUploadView: View {
     @State private var uploadResult: JamfPackageUploadResult?
     @State private var uploadError: String?
     @State private var activityMessages: [String] = []
+    @State private var uploadTask: Task<Void, Never>?
 
     init(packageURL: URL, suggestedFileName: String? = nil) {
         self.packageURL = packageURL
@@ -229,10 +230,15 @@ struct JamfUploadView: View {
 
             HStack {
                 Button(uploadResult == nil ? "Cancel" : "Done") {
-                    dismiss()
+                    if isUploading {
+                        // Stop the upload but keep the sheet open so the
+                        // user can see what state Jamf Pro was left in.
+                        uploadTask?.cancel()
+                    } else {
+                        dismiss()
+                    }
                 }
                 .keyboardShortcut(.cancelAction)
-                .disabled(isUploading)
 
                 Spacer()
 
@@ -382,7 +388,7 @@ struct JamfUploadView: View {
         uploadStage = .authenticating
         activityMessages = []
 
-        Task {
+        uploadTask = Task {
             do {
                 let result = try await JamfClient(
                     configuration: configuration,
@@ -401,11 +407,21 @@ struct JamfUploadView: View {
                 activityMessages.append(
                     "Jamf Pro reported the package \(result.cloudTransferStatus.lowercased())."
                 )
+            } catch where Task.isCancelled {
+                switch error as? JamfClientError {
+                case .packageRecordCreated, .packageUploadedStatusUnknown:
+                    // A package record exists in Jamf Pro, so explain it.
+                    uploadError = "Upload cancelled. \(error.localizedDescription)"
+                default:
+                    uploadError = "Upload cancelled. Nothing was added to Jamf Pro."
+                }
+                activityMessages.append("Upload cancelled.")
             } catch {
                 uploadError = error.localizedDescription
                 activityMessages.append("Boxing Day encountered an error.")
             }
             isUploading = false
+            uploadTask = nil
         }
     }
 }

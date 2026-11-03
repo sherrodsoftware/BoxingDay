@@ -12,6 +12,7 @@ struct ShellResult {
 enum ShellError: LocalizedError {
     case launchFailed(String)
     case nonZeroExit(command: String, result: ShellResult)
+    case cancelled
 
     var errorDescription: String? {
         switch self {
@@ -20,6 +21,44 @@ enum ShellError: LocalizedError {
         case .nonZeroExit(let command, let result):
             let trimmedErr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             return "Command failed (\(result.exitCode)): \(command)\n\(trimmedErr)"
+        case .cancelled:
+            return "The operation was cancelled."
+        }
+    }
+}
+
+/// Lets another thread stop a sequence of shell commands. Cancelling
+/// terminates the command that is running, and any later run throws
+/// `ShellError.cancelled` without launching.
+final class ShellCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    private var runningProcess: Process?
+
+    var isCancelled: Bool {
+        lock.withLock { cancelled }
+    }
+
+    func cancel() {
+        let process = lock.withLock { () -> Process? in
+            cancelled = true
+            return runningProcess
+        }
+        if let process, process.isRunning {
+            process.terminate()
+        }
+    }
+
+    func throwIfCancelled() throws {
+        if isCancelled { throw ShellError.cancelled }
+    }
+
+    /// Records the running process; returns false if already cancelled.
+    fileprivate func register(_ process: Process?) -> Bool {
+        lock.withLock {
+            guard !cancelled else { return false }
+            runningProcess = process
+            return true
         }
     }
 }
@@ -29,7 +68,13 @@ enum ShellError: LocalizedError {
 enum ShellRunner {
 
     @discardableResult
-    static func run(_ launchPath: String, _ arguments: [String]) throws -> ShellResult {
+    static func run(
+        _ launchPath: String,
+        _ arguments: [String],
+        cancellation: ShellCancellation? = nil
+    ) throws -> ShellResult {
+        try cancellation?.throwIfCancelled()
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: launchPath)
         process.arguments = arguments
@@ -44,6 +89,10 @@ enum ShellRunner {
         } catch {
             throw ShellError.launchFailed(error.localizedDescription)
         }
+        if let cancellation, !cancellation.register(process) {
+            process.terminate()
+        }
+        defer { _ = cancellation?.register(nil) }
 
         // Drain stderr concurrently so a child that fills the stderr pipe
         // cannot block while we wait on stdout.
@@ -64,6 +113,7 @@ enum ShellRunner {
             stderr: String(data: stderrData, encoding: .utf8) ?? ""
         )
 
+        try cancellation?.throwIfCancelled()
         if !result.succeeded {
             let commandDescription = (["/usr/bin/env", launchPath] + arguments).joined(separator: " ")
             throw ShellError.nonZeroExit(command: commandDescription, result: result)

@@ -14,6 +14,44 @@ final class ShellRunnerTests: XCTestCase {
         XCTAssertEqual(result.stderr, "error")
     }
 
+    func testCancellationTerminatesRunningCommand() {
+        let cancellation = ShellCancellation()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) {
+            cancellation.cancel()
+        }
+
+        let start = Date()
+        XCTAssertThrowsError(
+            try ShellRunner.run(
+                "/bin/sleep",
+                ["10"],
+                cancellation: cancellation
+            )
+        ) {
+            guard case ShellError.cancelled = $0 else {
+                return XCTFail("Unexpected error: \($0)")
+            }
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5)
+    }
+
+    func testCancelledTokenPreventsLaunch() {
+        let cancellation = ShellCancellation()
+        cancellation.cancel()
+
+        XCTAssertThrowsError(
+            try ShellRunner.run(
+                "/usr/bin/true",
+                [],
+                cancellation: cancellation
+            )
+        ) {
+            guard case ShellError.cancelled = $0 else {
+                return XCTFail("Unexpected error: \($0)")
+            }
+        }
+    }
+
     func testReportsNonZeroExitAndStandardError() {
         XCTAssertThrowsError(
             try ShellRunner.run(

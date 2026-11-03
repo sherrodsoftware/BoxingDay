@@ -50,6 +50,7 @@ struct ContentView: View {
     @State private var isViewActive = true
     @State private var didRunStartupCleanup = false
     @State private var showingJamfUpload = false
+    @State private var buildCancellation: ShellCancellation?
 
     private let acceptedTypes: [UTType] = [
         UTType.application,
@@ -127,6 +128,7 @@ struct ContentView: View {
                 for: NSApplication.willTerminateNotification
             )
         ) { _ in
+            buildCancellation?.cancel()
             discardPendingApp(force: true)
         }
         .focusedSceneValue(\.packageCommands, commandActions)
@@ -369,7 +371,9 @@ struct ContentView: View {
         case .resolving(let name):
             progressCard("Reading \(name)…")
         case .building(let name):
-            progressCard("Building package for \(name)…")
+            progressCard("Building package for \(name)…") {
+                buildCancellation?.cancel()
+            }
         case .success(let details):
             completionCard(details)
         case .failure(let message):
@@ -396,12 +400,19 @@ struct ContentView: View {
         }
     }
 
-    private func progressCard(_ message: String) -> some View {
+    private func progressCard(
+        _ message: String,
+        cancel: (() -> Void)? = nil
+    ) -> some View {
         HStack(spacing: 10) {
             ProgressView()
                 .controlSize(.small)
             Text(message)
             Spacer(minLength: 0)
+            if let cancel {
+                Button("Cancel", action: cancel)
+                    .keyboardShortcut(.cancelAction)
+            }
         }
         .padding(14)
         .background(
@@ -640,6 +651,8 @@ struct ContentView: View {
 
         let options = PkgOptions(identifier: identifier, version: version)
         status = .building(appURL.lastPathComponent)
+        let cancellation = ShellCancellation()
+        buildCancellation = cancellation
 
         DispatchQueue.global(qos: .userInitiated).async {
             do {
@@ -647,7 +660,8 @@ struct ContentView: View {
                     appURL: appURL,
                     workDir: workDir,
                     outputURL: outputURL,
-                    options: options
+                    options: options,
+                    cancellation: cancellation
                 )
                 let fileSize = try? outputURL.resourceValues(
                     forKeys: [.fileSizeKey]
@@ -662,6 +676,7 @@ struct ContentView: View {
                 )
 
                 DispatchQueue.main.async {
+                    buildCancellation = nil
                     guard isViewActive else {
                         if pendingWorkDir == workDir {
                             pendingAppURL = nil
@@ -675,6 +690,7 @@ struct ContentView: View {
                 }
             } catch {
                 DispatchQueue.main.async {
+                    buildCancellation = nil
                     guard isViewActive else {
                         if pendingWorkDir == workDir {
                             pendingAppURL = nil
@@ -684,7 +700,13 @@ struct ContentView: View {
                         removeWorkDirAsync(workDir)
                         return
                     }
-                    status = .failure(error.localizedDescription)
+                    if case ShellError.cancelled = error {
+                        // Return to the package details so the user can
+                        // adjust them or build again.
+                        status = .idle
+                    } else {
+                        status = .failure(error.localizedDescription)
+                    }
                 }
             }
         }

@@ -231,14 +231,19 @@ enum PkgBuilder {
         appURL: URL,
         workDir: URL,
         outputURL: URL,
-        options: PkgOptions
+        options: PkgOptions,
+        cancellation: ShellCancellation? = nil
     ) throws -> PkgBuildResult {
         let outputDirectory = outputURL.deletingLastPathComponent()
         guard FileManager.default.isWritableFile(atPath: outputDirectory.path) else {
             throw PkgBuilderError.outputDirectoryNotWritable(outputDirectory.path)
         }
 
-        let sourceSignatureStatus = codeSignatureStatus(for: appURL)
+        let sourceSignatureStatus = codeSignatureStatus(
+            for: appURL,
+            cancellation: cancellation
+        )
+        try cancellation?.throwIfCancelled()
 
         // 1. Build a staging root that mirrors the install location, e.g.
         //    stagingRoot/Applications/MyApp.app
@@ -258,21 +263,30 @@ enum PkgBuilder {
 
         let stagedAppURL = stagedInstallDir.appendingPathComponent(appURL.lastPathComponent)
         try FileManager.default.copyItem(at: appURL, to: stagedAppURL)
+        try cancellation?.throwIfCancelled()
 
         // 2a. Strip quarantine from the app bundle itself. This prevents
         //     macOS from translocating the installed app at launch without
         //     attempting to rewrite protected files within the bundle.
-        try removeQuarantine(from: stagedAppURL)
+        try removeQuarantine(from: stagedAppURL, cancellation: cancellation)
 
         // 2b. Ensure the top-level app bundle directory is traversable while
         //     preserving the developer's modes for every enclosed item.
-        try ShellRunner.run("/bin/chmod", ["755", stagedAppURL.path])
+        try ShellRunner.run(
+            "/bin/chmod",
+            ["755", stagedAppURL.path],
+            cancellation: cancellation
+        )
 
         // 2c. If the source signature was valid, require the staged app to
         //     remain valid after copying and preparation. An unsigned or
         //     already-invalid source is packaged with a visible warning.
         if sourceSignatureStatus == .valid,
-           case .unsignedOrInvalid(let reason) = codeSignatureStatus(for: stagedAppURL) {
+           case .unsignedOrInvalid(let reason) = codeSignatureStatus(
+               for: stagedAppURL,
+               cancellation: cancellation
+           ) {
+            try cancellation?.throwIfCancelled()
             throw PkgBuilderError.stagedCodeSignatureInvalid(reason)
         }
 
@@ -288,7 +302,8 @@ enum PkgBuilder {
         }
         try createNonRelocatableComponentPlist(
             stagingRoot: stagingRoot,
-            outputURL: componentPlistURL
+            outputURL: componentPlistURL,
+            cancellation: cancellation
         )
 
         // 4. Run pkgbuild. Preserve the enclosed files' modes while
@@ -309,7 +324,17 @@ enum PkgBuilder {
 
         args.append(outputURL.path)
 
-        try ShellRunner.run("/usr/bin/pkgbuild", args)
+        do {
+            try ShellRunner.run(
+                "/usr/bin/pkgbuild",
+                args,
+                cancellation: cancellation
+            )
+        } catch ShellError.cancelled {
+            // Don't leave a partially written package behind.
+            try? FileManager.default.removeItem(at: outputURL)
+            throw ShellError.cancelled
+        }
 
         let signatureWarning: String?
         switch sourceSignatureStatus {
@@ -330,11 +355,15 @@ enum PkgBuilder {
         ["-d", "com.apple.quarantine", appURL.path]
     }
 
-    private static func removeQuarantine(from appURL: URL) throws {
+    private static func removeQuarantine(
+        from appURL: URL,
+        cancellation: ShellCancellation?
+    ) throws {
         do {
             try ShellRunner.run(
                 "/usr/bin/xattr",
-                quarantineRemovalArguments(for: appURL)
+                quarantineRemovalArguments(for: appURL),
+                cancellation: cancellation
             )
         } catch let ShellError.nonZeroExit(_, result)
             where result.stderr.contains("No such xattr") {
@@ -344,12 +373,14 @@ enum PkgBuilder {
 
     private static func createNonRelocatableComponentPlist(
         stagingRoot: URL,
-        outputURL: URL
+        outputURL: URL,
+        cancellation: ShellCancellation?
     ) throws {
         do {
             try ShellRunner.run(
                 "/usr/bin/pkgbuild",
-                ["--analyze", "--root", stagingRoot.path, outputURL.path]
+                ["--analyze", "--root", stagingRoot.path, outputURL.path],
+                cancellation: cancellation
             )
 
             let data = try Data(contentsOf: outputURL)
@@ -371,6 +402,8 @@ enum PkgBuilder {
             try updatedData.write(to: outputURL, options: .atomic)
         } catch let error as PkgBuilderError {
             throw error
+        } catch ShellError.cancelled {
+            throw ShellError.cancelled
         } catch {
             throw PkgBuilderError.couldNotPrepareComponentMetadata(
                 error.localizedDescription
@@ -395,7 +428,10 @@ enum PkgBuilder {
         }
     }
 
-    static func codeSignatureStatus(for appURL: URL) -> AppSignatureStatus {
+    static func codeSignatureStatus(
+        for appURL: URL,
+        cancellation: ShellCancellation? = nil
+    ) -> AppSignatureStatus {
         do {
             try ShellRunner.run("/usr/bin/codesign", [
                 "--verify",
@@ -403,7 +439,7 @@ enum PkgBuilder {
                 "--strict",
                 "--verbose=2",
                 appURL.path
-            ])
+            ], cancellation: cancellation)
             return .valid
         } catch {
             return .unsignedOrInvalid(
