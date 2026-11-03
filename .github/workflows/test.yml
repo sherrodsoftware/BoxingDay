@@ -7,11 +7,12 @@ on:
 
 jobs:
   test:
-    runs-on: macos-15
+    # The project relies on Xcode 26 build settings (default main-actor
+    # isolation), so test with the same Xcode used for development.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Run tests
         run: >-
           xcodebuild -project "Boxing Day.xcodeproj" -scheme "Boxing Day"
-          -configuration Debug CODE_SIGNING_ALLOWED=NO
-          ENABLE_HARDENED_RUNTIME=NO test
+          -configuration Debug CODE_SIGNING_ALLOWED=NO test

@@ -4,6 +4,7 @@ import SwiftUI
 
 /// Publishes whether Sparkle can start a user-initiated update check, so
 /// the menu item is disabled while a check is already in progress.
+@MainActor
 @Observable
 final class UpdateAvailability {
     private(set) var canCheckForUpdates = false
