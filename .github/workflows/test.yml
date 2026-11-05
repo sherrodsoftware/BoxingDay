@@ -12,6 +12,8 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Run tests
         run: >-
           xcodebuild -project "Boxing Day.xcodeproj" -scheme "Boxing Day"
