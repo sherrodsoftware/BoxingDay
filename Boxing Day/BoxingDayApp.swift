@@ -33,6 +33,15 @@ struct BoxingDayApp: App {
                 updater: Self.updaterController.updater,
                 availability: updateAvailability
             )
+            // Boxing Day has no Help Book; its documentation is the README.
+            CommandGroup(replacing: .help) {
+                Button("Boxing Day Help") {
+                    NSWorkspace.shared.open(
+                        URL(string: "https://github.com/sherrodsoftware/BoxingDay")!
+                    )
+                }
+                .keyboardShortcut("?", modifiers: .command)
+            }
         }
 
         Settings {
