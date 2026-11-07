@@ -7,19 +7,18 @@ struct BoxingDayApp: App {
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
 
     /// Sparkle reads SUFeedURL and SUPublicEDKey from Info.plist and checks
-    /// for updates on its own schedule once the user allows it.
-    private let updaterController = SPUStandardUpdaterController(
-        startingUpdater: true,
+    /// for updates on its own schedule once the user allows it. It starts
+    /// from the app delegate rather than here: starting during App init
+    /// lets Sparkle's permission prompt appear before SwiftUI opens the main
+    /// window, and the window then never opens.
+    static let updaterController = SPUStandardUpdaterController(
+        startingUpdater: false,
         updaterDelegate: nil,
         userDriverDelegate: nil
     )
-    private let updateAvailability: UpdateAvailability
-
-    init() {
-        updateAvailability = UpdateAvailability(
-            updater: updaterController.updater
-        )
-    }
+    private let updateAvailability = UpdateAvailability(
+        updater: updaterController.updater
+    )
 
     var body: some Scene {
         // Boxing Day works on one item at a time, so it has a single window.
@@ -31,7 +30,7 @@ struct BoxingDayApp: App {
         .commands {
             PackageCommands()
             UpdateCommands(
-                updater: updaterController.updater,
+                updater: Self.updaterController.updater,
                 availability: updateAvailability
             )
         }
@@ -43,6 +42,14 @@ struct BoxingDayApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Wait one run loop turn so SwiftUI has opened the main window
+        // before Sparkle can show its first-run permission prompt.
+        DispatchQueue.main.async {
+            BoxingDayApp.updaterController.startUpdater()
+        }
+    }
+
     /// Closing the only window quits, as with other single-window utilities.
     func applicationShouldTerminateAfterLastWindowClosed(
         _ sender: NSApplication
