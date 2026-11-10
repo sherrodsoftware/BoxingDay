@@ -28,6 +28,29 @@ struct BoxingDayApp: App {
         }
         .defaultSize(width: 560, height: 680)
         .commands {
+            // Matches the About panel in Version Report: copyright and a
+            // link to the Sherrod Software website below the version.
+            CommandGroup(replacing: .appInfo) {
+                Button("About Boxing Day") {
+                    let credits = NSMutableAttributedString()
+                    let smallFont = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+                    credits.append(NSAttributedString(
+                        string: "© Sherrod Software\n",
+                        attributes: [.font: smallFont]
+                    ))
+                    credits.append(NSAttributedString(
+                        string: "www.sherrodsoftware.com",
+                        attributes: [
+                            .font: smallFont,
+                            .link: URL(string: "https://www.sherrodsoftware.com")!
+                        ]
+                    ))
+                    NSApplication.shared.orderFrontStandardAboutPanel(options: [
+                        .applicationName: "Boxing Day",
+                        .credits: credits
+                    ])
+                }
+            }
             PackageCommands()
             UpdateCommands(
                 updater: Self.updaterController.updater,
