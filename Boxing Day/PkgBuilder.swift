@@ -269,6 +269,7 @@ nonisolated enum PkgBuilder {
         //     macOS from translocating the installed app at launch without
         //     attempting to rewrite protected files within the bundle.
         try removeQuarantine(from: stagedAppURL, cancellation: cancellation)
+        try removeFinderInfo(from: stagedAppURL, cancellation: cancellation)
 
         // 2b. Ensure the top-level app bundle directory is traversable while
         //     preserving the developer's modes for every enclosed item.
@@ -349,6 +350,22 @@ nonisolated enum PkgBuilder {
             """
         }
         return PkgBuildResult(signatureWarning: signatureWarning)
+    }
+
+    /// Removes Finder metadata (`com.apple.FinderInfo`) from every item in
+    /// Boxing Day's working copy of an app. Code signatures don't cover it,
+    /// but `codesign --strict` rejects an app that has it, and some vendors'
+    /// disk images ship apps with it set, such as Google Chrome's. Only ever
+    /// call this on a copy, never on the original the user chose.
+    static func removeFinderInfo(
+        from appURL: URL,
+        cancellation: ShellCancellation? = nil
+    ) throws {
+        try ShellRunner.run(
+            "/usr/bin/xattr",
+            ["-d", "-r", "com.apple.FinderInfo", appURL.path],
+            cancellation: cancellation
+        )
     }
 
     static func quarantineRemovalArguments(for appURL: URL) -> [String] {

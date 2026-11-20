@@ -154,6 +154,45 @@ final class PkgBuilderTests: XCTestCase {
         XCTAssertTrue(try stagingDirectories(in: workDirectory).isEmpty)
     }
 
+    func testRemovingFinderInfoRestoresAStrictlyValidSignature() throws {
+        let fixture = try TestWorkspace()
+        let app = try fixture.app("Signed.app", executable: true)
+        try ShellRunner.run(
+            "/usr/bin/codesign",
+            ["--force", "--deep", "--sign", "-", app.path]
+        )
+        // Some vendors' disk images ship files with Finder metadata set,
+        // which the signature doesn't cover but --strict rejects.
+        let executable = app.appendingPathComponent("Contents/MacOS/TestApp")
+        try ShellRunner.run(
+            "/usr/bin/xattr",
+            // A file type and creator ("TEXT"/"ttxt"); all-zero Finder info
+            // counts as absent and wouldn't fail the check.
+            ["-wx", "com.apple.FinderInfo", "5445585474747874" + String(repeating: "00", count: 24), executable.path]
+        )
+        try ShellRunner.run(
+            "/usr/bin/xattr",
+            ["-w", "com.example.keep", "value", executable.path]
+        )
+        guard case .unsignedOrInvalid = PkgBuilder.codeSignatureStatus(for: app) else {
+            return XCTFail("Expected Finder metadata to fail the strict check")
+        }
+
+        try PkgBuilder.removeFinderInfo(from: app)
+
+        XCTAssertEqual(PkgBuilder.codeSignatureStatus(for: app), .valid)
+        let remaining = try ShellRunner.run("/usr/bin/xattr", [executable.path]).stdout
+        XCTAssertFalse(remaining.contains("com.apple.FinderInfo"))
+        XCTAssertTrue(remaining.contains("com.example.keep"), "Only Finder metadata should be removed")
+    }
+
+    func testRemovingFinderInfoFromACleanAppSucceeds() throws {
+        let fixture = try TestWorkspace()
+        let app = try fixture.app("Clean.app", executable: true)
+
+        XCTAssertNoThrow(try PkgBuilder.removeFinderInfo(from: app))
+    }
+
     func testBuiltPackageDisablesBundleRelocation() throws {
         let fixture = try TestWorkspace()
         let app = try fixture.app(
