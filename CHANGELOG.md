@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## Boxing Day 2026.11.20
 
 - **Enhanced Security.** Boxing Day now uses Apple's Enhanced Security protections: a hardened memory allocator, read-only dynamic linker state, and runtime restrictions on the libraries it loads and the messages it receives from other processes. On Macs with an M5 chip or later, hardware memory tagging runs in soft mode, which records memory errors as simulated crash reports instead of quitting. Pointer authentication (an `arm64e` build) is left off for now because the Sparkle framework doesn't ship that architecture. The decisions are recorded in docs/xcode-security-settings.md.
 - **Google Chrome shows as signed.** Some disk images, including Google Chrome's, ship apps whose files carry Finder metadata. The code signature doesn't cover it, but Boxing Day's strict signature check rejected it, so Chrome showed "Unsigned or signature invalid" even though it's properly signed. Boxing Day now removes that metadata from its own copy of the app (never the original) before checking, so the check passes, the staged copy is verified again before packaging, and the installed app no longer carries the metadata.
