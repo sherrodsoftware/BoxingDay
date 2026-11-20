@@ -92,19 +92,20 @@ nonisolated enum AppResolver {
     /// Removes abandoned workspaces created by Boxing Day processes that are
     /// no longer running. Active workspaces from this or another instance are
     /// left untouched.
-    static func cleanupAbandonedWorkDirs() {
-        let fileManager = FileManager.default
-        let tempDirectory = fileManager.temporaryDirectory
-        guard let contents = try? fileManager.contentsOfDirectory(
-            at: tempDirectory,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return
-        }
+    ///
+    /// Pass `temporaryItemNames` to reuse one listing of the temporary
+    /// directory across cleanups; otherwise it's listed here.
+    static func cleanupAbandonedWorkDirs(
+        temporaryItemNames: [String]? = nil
+    ) {
+        let tempDirectory = FileManager.default.temporaryDirectory
+        let names = temporaryItemNames ?? temporaryDirectoryNames()
 
         let currentPID = ProcessInfo.processInfo.processIdentifier
-        for candidate in contents {
+        // Filter by name before touching the file system: the temporary
+        // directory can hold thousands of other apps' items.
+        for name in names where name.hasPrefix("AppToPkg-") {
+            let candidate = tempDirectory.appendingPathComponent(name, isDirectory: true)
             guard let ownerPID = workDirOwnerPID(candidate),
                   ownerPID != currentPID,
                   !processIsRunning(ownerPID)
@@ -113,6 +114,15 @@ nonisolated enum AppResolver {
             }
             removeWorkDir(at: candidate)
         }
+    }
+
+    /// The names of everything in the temporary directory, read in one
+    /// pass without fetching any file attributes.
+    static func temporaryDirectoryNames() -> [String] {
+        let fileManager = FileManager.default
+        return (try? fileManager.contentsOfDirectory(
+            atPath: fileManager.temporaryDirectory.path
+        )) ?? []
     }
 
     static func removeWorkDir(at workDir: URL) {

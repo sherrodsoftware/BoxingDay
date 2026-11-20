@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import UniformTypeIdentifiers
 
 struct SelectedAppDetails {
     let name: String
@@ -57,6 +58,8 @@ enum BuildStatus: Equatable {
 @Observable
 final class PackagingModel {
     private static let lastPackageSaveDirectoryKey = "lastPackageSaveDirectory"
+    private static let packageType = UTType("com.apple.installer-package-archive") ?? .data
+    private static let acceptedTypes: [UTType] = [.application, .diskImage, .zip, packageType]
 
     var status: BuildStatus = .idle
     var identifier = ""
@@ -103,14 +106,70 @@ final class PackagingModel {
         return "\(appName) \(version).pkg"
     }
 
+    // MARK: - Menu commands
+
+    /// Menu commands are unavailable while work runs or the upload sheet is
+    /// open, since the sheet owns the window until it's dismissed.
+    private var isBusy: Bool {
+        status.isWorking || showingJamfUpload
+    }
+
+    var canChooseFile: Bool { !isBusy }
+    var canBuildFromMenu: Bool { !isBusy && canBuild }
+    var canUpload: Bool { !isBusy && uploadablePackageURL != nil }
+    var canRevealCompletedPackage: Bool { !isBusy && completedPackageURL != nil }
+
+    func chooseFile() {
+        guard !status.isWorking else { return }
+
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = Self.acceptedTypes
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.treatsFilePackagesAsDirectories = false
+        panel.message = "Choose a .app, .dmg, .zip, or .pkg file."
+        panel.prompt = "Choose"
+
+        panel.presentAttachedToKeyWindow { url in
+            Task { await self.resolveSelectedFile(at: url) }
+        }
+    }
+
+    /// Asks where to save the package, then builds it there.
+    func chooseBuildDestination() {
+        guard canBuild else { return }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [Self.packageType]
+        panel.nameFieldStringValue = suggestedPackageFileName ?? ""
+        panel.directoryURL = preferredPackageSaveDirectory()
+
+        panel.presentAttachedToKeyWindow { outputURL in
+            Task { await self.build(to: outputURL) }
+        }
+    }
+
+    func presentUpload() {
+        guard uploadablePackageURL != nil else { return }
+        showingJamfUpload = true
+    }
+
+    func revealCompletedPackage() {
+        guard let completedPackageURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([completedPackageURL])
+    }
+
     // MARK: - Lifecycle
 
     func runStartupCleanupOnce() {
         guard !didRunStartupCleanup else { return }
         didRunStartupCleanup = true
         Task.detached(priority: .utility) {
-            AppResolver.cleanupAbandonedWorkDirs()
-            JamfClient.cleanupAbandonedUploadBodies()
+            // List the temporary directory once for both cleanups.
+            let names = AppResolver.temporaryDirectoryNames()
+            AppResolver.cleanupAbandonedWorkDirs(temporaryItemNames: names)
+            JamfClient.cleanupAbandonedUploadBodies(temporaryItemNames: names)
         }
     }
 
@@ -290,6 +349,9 @@ extension PackagingModel {
         do {
             switch result.input {
             case .app(let appURL):
+                // appURL is Boxing Day's copy, so it's safe to clean up
+                // Finder metadata that would fail the strict signature check.
+                try PkgBuilder.removeFinderInfo(from: appURL)
                 // codesign --deep can take seconds on large apps.
                 return ResolvedSelection(
                     kind: .app(

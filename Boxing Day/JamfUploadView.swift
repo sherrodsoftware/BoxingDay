@@ -1,473 +1,393 @@
 import SwiftUI
 
+// Each section is its own View that reads only what it shows, so Observation
+// redraws just that section when the model changes. Upload progress, which
+// changes most often, is read only by UploadProgressRow.
+
 struct JamfUploadView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.openSettings) private var openSettings
-
-    let packageURL: URL
-
-    @State private var packageName: String
-    @State private var fileName: String
-    @State private var categoryID = "-1"
-    @State private var categories = [JamfCategory.noCategory]
-    @State private var isLoadingCategories = false
-    @State private var categoryError: String?
-    @State private var priority = 10
-    @State private var notes = ""
-
-    @State private var configuration: JamfConfiguration?
-    @State private var clientSecret = ""
-    @State private var configurationError: String?
-    @State private var isUploading = false
-    @State private var uploadStage: JamfUploadStage = .checkingForDuplicate
-    @State private var uploadProgress = 0.0
-    @State private var uploadResult: JamfPackageUploadResult?
-    @State private var uploadError: String?
-    @State private var uploadWasCancelled = false
-    /// A filename that now has a Jamf Pro package record from an
-    /// unfinished upload. Uploading it again would fail the duplicate check.
-    @State private var fileNameInUse: String?
-    @State private var activityMessages: [String] = []
-    @State private var uploadTask: Task<Void, Never>?
+    @State private var model: JamfUploadModel
 
     init(packageURL: URL, suggestedFileName: String? = nil) {
-        self.packageURL = packageURL
-        let initialFileName = suggestedFileName ?? packageURL.lastPathComponent
-        let initialName = (initialFileName as NSString).deletingPathExtension
-        _packageName = State(initialValue: initialName)
-        _fileName = State(initialValue: initialFileName)
+        self.init(model: JamfUploadModel(
+            packageURL: packageURL,
+            suggestedFileName: suggestedFileName
+        ))
     }
 
-    private var options: JamfPackageUploadOptions {
-        JamfPackageUploadOptions(
-            packageName: packageName,
-            fileName: fileName,
-            categoryID: categoryID,
-            priority: priority,
-            notes: notes
-        )
-    }
-
-    private var canUpload: Bool {
-        configuration != nil
-            && !clientSecret.isEmpty
-            && !isLoadingCategories
-            && categoryError == nil
-            && options.validationError == nil
-            && !isUploading
-            && uploadResult == nil
-            && fileNameInUse != fileName.trimmingCharacters(
-                in: .whitespacesAndNewlines
-            )
+    init(model: JamfUploadModel) {
+        _model = State(initialValue: model)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Upload to Jamf Pro")
-                        .font(.title2)
-                        .bold()
-                    Text(packageURL.path)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help(packageURL.path)
-                }
-                Spacer()
-            }
-            .padding(20)
+            UploadHeader(packageURL: model.packageURL)
 
             Divider()
 
             Form {
-                Section("Jamf Package Record") {
-                    TextField("Package name", text: $packageName)
-                        .disabled(isUploading || uploadResult != nil)
-                    TextField("Filename", text: $fileName)
-                        .disabled(isUploading || uploadResult != nil)
-                    Picker("Category", selection: $categoryID) {
-                        ForEach(categories) { category in
-                            Text(category.name).tag(category.id)
-                        }
-                    }
-                    .disabled(isUploading || uploadResult != nil)
-                    Stepper(
-                        "Priority: \(priority)",
-                        value: $priority,
-                        in: 1...20
-                    )
-                    .disabled(isUploading || uploadResult != nil)
-
-                    TextField(
-                        "Notes (optional)",
-                        text: $notes,
-                        axis: .vertical
-                    )
-                    .lineLimit(2...4)
-                    .disabled(isUploading || uploadResult != nil)
-                }
-
-                if isLoadingCategories {
-                    Section {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Loading categories from Jamf Pro…")
-                        }
-                    }
-                }
-
-                if let categoryError {
-                    Section("Categories") {
-                        Label(
-                            categoryError,
-                            systemImage: "exclamationmark.triangle.fill"
-                        )
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                        Button("Try Again") {
-                            loadCategories()
-                        }
-                        .disabled(isLoadingCategories)
-                    }
-                }
-
-                if let validationError = options.validationError,
-                   uploadResult == nil {
-                    Section {
-                        Label(
-                            validationError,
-                            systemImage: "exclamationmark.circle.fill"
-                        )
-                        .foregroundStyle(.red)
-                    }
-                }
-
-                if let configurationError {
-                    Section("Jamf Connection") {
-                        Label(
-                            configurationError,
-                            systemImage: "exclamationmark.triangle.fill"
-                        )
-                        .foregroundStyle(.orange)
-                        Button("Open Settings…") {
-                            openSettings()
-                        }
-                    }
-                }
-
-                if isUploading || !activityMessages.isEmpty {
-                    Section("Jamf Activity") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(
-                                Array(activityMessages.enumerated()),
-                                id: \.offset
-                            ) { index, message in
-                                Label {
-                                    Text(message)
-                                } icon: {
-                                    Image(
-                                        systemName: activityIcon(
-                                            at: index
-                                        )
-                                    )
-                                    .foregroundStyle(
-                                        activityColor(at: index)
-                                    )
-                                }
-                            }
-
-                            if isUploading && uploadStage == .uploading {
-                                ProgressView(value: uploadProgress)
-                                Text(
-                                    uploadProgress,
-                                    format: .percent.precision(
-                                        .fractionLength(0)
-                                    )
-                                )
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            } else if isUploading {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                        }
-                    }
-                }
-
-                if let uploadResult {
-                    Section("Upload Complete") {
-                        Label(
-                            "Package is available in Jamf Pro",
-                            systemImage: "checkmark.circle.fill"
-                        )
-                        .foregroundStyle(.green)
-                        LabeledContent("Package ID", value: uploadResult.packageID)
-                        LabeledContent("Filename", value: uploadResult.fileName)
-                        LabeledContent(
-                            "Cloud status",
-                            value: uploadResult.cloudTransferStatus
-                        )
-                    }
-                }
-
-                if let uploadError {
-                    Section(uploadWasCancelled ? "Upload Cancelled" : "Upload Failed") {
-                        Label(
-                            uploadError,
-                            systemImage: uploadWasCancelled
-                                ? "stop.circle.fill"
-                                : "exclamationmark.triangle.fill"
-                        )
-                        .foregroundStyle(uploadWasCancelled ? .orange : .red)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                        HStack {
-                            Button("Copy Error") {
-                                ErrorReportExporter.copy(message: uploadError)
-                            }
-                            Button("Save Error as Text…") {
-                                ErrorReportExporter.save(
-                                    message: uploadError,
-                                    suggestedFileName: "Boxing Day Jamf Upload Error.txt"
-                                )
-                            }
-                        }
-                    }
-                }
+                RecordFieldsSection(model: model)
+                CategoryStatusSection(model: model)
+                ValidationSection(model: model)
+                ConnectionSection(model: model)
+                ActivitySection(model: model)
+                ResultSection(model: model)
+                ErrorSection(model: model)
             }
             .formStyle(.grouped)
 
             Divider()
 
-            HStack {
-                Button(uploadResult == nil ? "Cancel" : "Done") {
-                    if isUploading {
-                        // Stop the upload but keep the sheet open so the
-                        // user can see what state Jamf Pro was left in.
-                        uploadTask?.cancel()
-                    } else {
-                        dismiss()
-                    }
-                }
-                .keyboardShortcut(.cancelAction)
-
-                Spacer()
-
-                Button("Upload") {
-                    startUpload()
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(!canUpload)
-            }
-            .padding(16)
+            UploadFooter(model: model)
         }
         .frame(minWidth: 580, idealWidth: 580, minHeight: 520, idealHeight: 650)
-        .interactiveDismissDisabled(isUploading)
-        .onChange(of: activityMessages) { _, messages in
-            // The activity list is the upload's progress, so read each new
-            // step aloud; the final result is announced separately.
-            if isUploading, let latest = messages.last {
-                AccessibilityNotification.Announcement(latest).post()
-            }
-        }
-        .onChange(of: uploadResult) { _, result in
-            if result != nil {
-                AccessibilityNotification.Announcement(
-                    "Upload complete. Package is available in Jamf Pro."
-                ).post()
-            }
-        }
-        .onChange(of: uploadError) { _, error in
-            if let error {
-                AccessibilityNotification.Announcement(error).post()
-            }
-        }
+        .uploadDismissal(model: model)
+        .uploadAnnouncements(model: model)
         .onAppear {
-            loadConnection()
+            model.loadConnection()
         }
         .onDisappear {
-            clientSecret = ""
+            model.forgetSecret()
         }
     }
+}
 
-    private var stageDescription: String {
-        switch uploadStage {
-        case .authenticating:
-            return "Authenticating with Jamf Pro…"
-        case .checkingForDuplicate:
-            return "Checking for an existing filename…"
-        case .creatingRecord:
-            return "Creating the Jamf package record…"
-        case .preparingUpload:
-            return "Preparing the package upload…"
-        case .uploading:
-            return "Uploading \(fileName)…"
-        case .refreshingAuthentication:
-            return "Renewing the Jamf Pro connection…"
-        case .processingCloud(let status):
-            if let status, !status.isEmpty {
-                return "Jamf cloud processing: \(status)"
+// MARK: - Sheet-wide behavior
+
+/// Prevents closing the sheet while an upload runs.
+private struct UploadDismissal: ViewModifier {
+    let model: JamfUploadModel
+
+    func body(content: Content) -> some View {
+        content.interactiveDismissDisabled(model.isUploading)
+    }
+}
+
+/// Announces upload steps and the outcome for VoiceOver. As a modifier, it
+/// keeps those reads out of the sheet's body.
+private struct UploadAnnouncements: ViewModifier {
+    let model: JamfUploadModel
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: model.activity.last?.id) {
+                // The activity list is the upload's progress, so read each
+                // new step aloud; the final result is announced separately.
+                if model.isUploading, let latest = model.activity.last {
+                    AccessibilityNotification.Announcement(latest.message).post()
+                }
             }
-            return "Waiting for Jamf cloud processing…"
-        }
-    }
-
-    private func activityIcon(at index: Int) -> String {
-        if uploadResult != nil {
-            return "checkmark.circle.fill"
-        }
-        if uploadError != nil && index == activityMessages.indices.last {
-            return uploadWasCancelled
-                ? "stop.circle.fill"
-                : "exclamationmark.triangle.fill"
-        }
-        if isUploading && index == activityMessages.indices.last {
-            return "arrow.right.circle.fill"
-        }
-        return "checkmark.circle.fill"
-    }
-
-    private func activityColor(at index: Int) -> Color {
-        if uploadError != nil && index == activityMessages.indices.last {
-            return uploadWasCancelled ? .orange : .red
-        }
-        if isUploading && index == activityMessages.indices.last {
-            return .accentColor
-        }
-        return .green
-    }
-
-    private func recordActivity(for stage: JamfUploadStage) {
-        uploadStage = stage
-        let message = stageDescription
-            .replacingOccurrences(of: "…", with: "")
-        guard activityMessages.last != message else { return }
-        activityMessages.append(message)
-    }
-
-    private func loadConnection() {
-        do {
-            let saved = JamfPreferences.load()
-            let loadedConfiguration = try JamfConfiguration(
-                serverURL: saved.serverURL,
-                clientID: saved.clientID
-            ).validated()
-            guard let loadedSecret = try KeychainStore.loadClientSecret(),
-                  !loadedSecret.isEmpty else {
-                throw JamfConfigurationError.missingClientSecret
+            .onChange(of: model.uploadResult) { _, result in
+                if result != nil {
+                    AccessibilityNotification.Announcement(
+                        "Upload complete. Package is available in Jamf Pro."
+                    ).post()
+                }
             }
-            configuration = loadedConfiguration
-            clientSecret = loadedSecret
-            configurationError = nil
-            loadCategories()
-        } catch {
-            configuration = nil
-            clientSecret = ""
-            configurationError = """
-            Configure and test a Jamf Pro connection before uploading. \
-            \(error.localizedDescription)
-            """
-        }
+            .onChange(of: model.uploadError) { _, error in
+                if let error {
+                    AccessibilityNotification.Announcement(error).post()
+                }
+            }
+    }
+}
+
+private extension View {
+    func uploadDismissal(model: JamfUploadModel) -> some View {
+        modifier(UploadDismissal(model: model))
     }
 
-    private func loadCategories() {
-        guard let configuration, !clientSecret.isEmpty else { return }
+    func uploadAnnouncements(model: JamfUploadModel) -> some View {
+        modifier(UploadAnnouncements(model: model))
+    }
+}
 
-        isLoadingCategories = true
-        categoryError = nil
-        Task {
-            do {
-                let loaded = try await JamfClient(
-                    configuration: configuration,
-                    clientSecret: clientSecret
-                ).categories()
-                let allCategories = [JamfCategory.noCategory] + loaded
-                let preferred = JamfPreferences.preferredCategory(
-                    in: allCategories
+// MARK: - Header and footer
+
+private struct UploadHeader: View {
+    let packageURL: URL
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Upload to Jamf Pro")
+                    .font(.title2)
+                    .bold()
+                Text(packageURL.path)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(packageURL.path)
+            }
+            Spacer()
+        }
+        .padding(20)
+    }
+}
+
+private struct UploadFooter: View {
+    @Environment(\.dismiss) private var dismiss
+    let model: JamfUploadModel
+
+    var body: some View {
+        HStack {
+            Button(model.uploadResult == nil ? "Cancel" : "Done") {
+                if model.isUploading {
+                    // Stop the upload but keep the sheet open so the
+                    // user can see what state Jamf Pro was left in.
+                    model.cancelUpload()
+                } else {
+                    dismiss()
+                }
+            }
+            .keyboardShortcut(.cancelAction)
+
+            Spacer()
+
+            Button("Upload") {
+                model.startUpload()
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
+            .disabled(!model.canUpload)
+        }
+        .padding(16)
+    }
+}
+
+// MARK: - Record fields
+
+private struct RecordFieldsSection: View {
+    @Bindable var model: JamfUploadModel
+
+    var body: some View {
+        let isEditable = model.isEditable
+
+        Section("Jamf Package Record") {
+            TextField("Package name", text: $model.packageName)
+                .disabled(!isEditable)
+            TextField("Filename", text: $model.fileName)
+                .disabled(!isEditable)
+            Picker("Category", selection: $model.categoryID) {
+                ForEach(model.categories) { category in
+                    Text(category.name).tag(category.id)
+                }
+            }
+            .disabled(!isEditable)
+            Stepper(
+                "Priority: \(model.priority)",
+                value: $model.priority,
+                in: 1...20
+            )
+            .disabled(!isEditable)
+
+            TextField(
+                "Notes (optional)",
+                text: $model.notes,
+                axis: .vertical
+            )
+            .lineLimit(2...4)
+            .disabled(!isEditable)
+        }
+    }
+}
+
+private struct CategoryStatusSection: View {
+    let model: JamfUploadModel
+
+    var body: some View {
+        if model.isLoadingCategories {
+            Section {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading categories from Jamf Pro…")
+                }
+            }
+        }
+
+        if let categoryError = model.categoryError {
+            Section("Categories") {
+                Label(
+                    categoryError,
+                    systemImage: "exclamationmark.triangle.fill"
                 )
-
-                categories = allCategories
-                categoryID = preferred?.id ?? JamfCategory.noCategory.id
-                categoryError = nil
-            } catch {
-                categories = [JamfCategory.noCategory]
-                categoryID = JamfCategory.noCategory.id
-                categoryError = """
-                Boxing Day could not load categories from Jamf Pro. \
-                \(error.localizedDescription)
-                """
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                Button("Try Again") {
+                    model.loadCategories()
+                }
+                .disabled(model.isLoadingCategories)
             }
-            isLoadingCategories = false
         }
     }
+}
 
-    private func startUpload() {
-        guard let configuration, canUpload else { return }
+private struct ValidationSection: View {
+    let model: JamfUploadModel
 
-        isUploading = true
-        uploadError = nil
-        uploadWasCancelled = false
-        uploadResult = nil
-        uploadProgress = 0
-        uploadStage = .authenticating
-        activityMessages = []
+    var body: some View {
+        if let validationError = model.options.validationError,
+           model.uploadResult == nil {
+            Section {
+                Label(
+                    validationError,
+                    systemImage: "exclamationmark.circle.fill"
+                )
+                .foregroundStyle(.red)
+            }
+        }
+    }
+}
 
-        uploadTask = Task {
-            do {
-                let result = try await JamfClient(
-                    configuration: configuration,
-                    clientSecret: clientSecret
-                ).uploadPackage(
-                    at: packageURL,
-                    options: options,
-                    stageChanged: { stage in
-                        recordActivity(for: stage)
-                    },
-                    progressChanged: { progress in
-                        uploadProgress = progress
+private struct ConnectionSection: View {
+    @Environment(\.openSettings) private var openSettings
+    let model: JamfUploadModel
+
+    var body: some View {
+        if let configurationError = model.configurationError {
+            Section("Jamf Connection") {
+                Label(
+                    configurationError,
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .foregroundStyle(.orange)
+                Button("Open Settings…") {
+                    openSettings()
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Activity
+
+private struct ActivitySection: View {
+    let model: JamfUploadModel
+
+    var body: some View {
+        if model.isUploading || !model.activity.isEmpty {
+            Section("Jamf Activity") {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.activity) { step in
+                        ActivityRow(step: step)
                     }
-                )
-                uploadResult = result
-                activityMessages.append(
-                    "Jamf Pro reported the package \(result.cloudTransferStatus.lowercased())."
-                )
-            } catch where Task.isCancelled {
-                uploadWasCancelled = true
-                switch error as? JamfClientError {
-                case .packageRecordCreated(let packageID, _):
-                    fileNameInUse = options.fileName
-                    uploadError = """
-                    Upload cancelled. Jamf Pro package record \(packageID) was \
-                    created without a file. Delete it in Jamf Pro, or choose a \
-                    different filename, before uploading again.
-                    """
-                case .packageUploadedStatusUnknown(let packageID, _):
-                    fileNameInUse = options.fileName
-                    uploadError = """
-                    Stopped waiting for Jamf Pro. The file was already uploaded \
-                    as package ID \(packageID); check its status in Jamf Pro.
-                    """
-                default:
-                    uploadError = "Upload cancelled. Nothing was added to Jamf Pro."
+
+                    if model.isUploading {
+                        UploadProgressRow(model: model)
+                    }
                 }
-                activityMessages.append("Upload cancelled")
-            } catch {
-                switch error as? JamfClientError {
-                case .packageRecordCreated, .packageUploadedStatusUnknown:
-                    // The record exists, so this filename is now taken.
-                    fileNameInUse = options.fileName
-                default:
-                    break
-                }
-                uploadError = error.localizedDescription
-                activityMessages.append("Boxing Day encountered an error.")
             }
-            isUploading = false
-            uploadTask = nil
+        }
+    }
+}
+
+/// One step, drawn from its own state, so adding a step redraws only the
+/// new row and the one it finished.
+private struct ActivityRow: View {
+    let step: UploadActivity
+
+    var body: some View {
+        Label {
+            Text(step.message)
+        } icon: {
+            Image(systemName: symbolName)
+                .foregroundStyle(color)
+        }
+    }
+
+    private var symbolName: String {
+        switch step.state {
+        case .inProgress: "arrow.right.circle.fill"
+        case .done: "checkmark.circle.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        case .cancelled: "stop.circle.fill"
+        }
+    }
+
+    private var color: Color {
+        switch step.state {
+        case .inProgress: .accentColor
+        case .done: .green
+        case .failed: .red
+        case .cancelled: .orange
+        }
+    }
+}
+
+/// The only view that reads upload progress, so a progress update redraws
+/// just the bar and percentage.
+private struct UploadProgressRow: View {
+    let model: JamfUploadModel
+
+    var body: some View {
+        if model.uploadStage == .uploading {
+            ProgressView(value: model.uploadProgress)
+            Text(
+                model.uploadProgress,
+                format: .percent.precision(.fractionLength(0))
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } else {
+            ProgressView()
+                .controlSize(.small)
+        }
+    }
+}
+
+// MARK: - Outcome
+
+private struct ResultSection: View {
+    let model: JamfUploadModel
+
+    var body: some View {
+        if let uploadResult = model.uploadResult {
+            Section("Upload Complete") {
+                Label(
+                    "Package is available in Jamf Pro",
+                    systemImage: "checkmark.circle.fill"
+                )
+                .foregroundStyle(.green)
+                LabeledContent("Package ID", value: uploadResult.packageID)
+                LabeledContent("Filename", value: uploadResult.fileName)
+                LabeledContent(
+                    "Cloud status",
+                    value: uploadResult.cloudTransferStatus
+                )
+            }
+        }
+    }
+}
+
+private struct ErrorSection: View {
+    let model: JamfUploadModel
+
+    var body: some View {
+        if let uploadError = model.uploadError {
+            let cancelled = model.uploadWasCancelled
+            Section(cancelled ? "Upload Cancelled" : "Upload Failed") {
+                Label(
+                    uploadError,
+                    systemImage: cancelled
+                        ? "stop.circle.fill"
+                        : "exclamationmark.triangle.fill"
+                )
+                .foregroundStyle(cancelled ? .orange : .red)
+                .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Button("Copy Error") {
+                        ErrorReportExporter.copy(message: uploadError)
+                    }
+                    Button("Save Error as Text…") {
+                        ErrorReportExporter.save(
+                            message: uploadError,
+                            suggestedFileName: "Boxing Day Jamf Upload Error.txt"
+                        )
+                    }
+                }
+            }
         }
     }
 }

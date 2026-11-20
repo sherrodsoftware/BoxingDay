@@ -162,9 +162,9 @@ nonisolated enum JamfPreferences {
     /// The saved default category within `categories`, matched by ID and
     /// name, then by name alone in case the category was recreated.
     static func preferredCategory(
-        in categories: [JamfCategory]
+        in categories: [JamfCategory],
+        saved: SavedJamfSettings = load()
     ) -> JamfCategory? {
-        let saved = load()
         let nameMatches: (JamfCategory) -> Bool = {
             $0.name.caseInsensitiveCompare(saved.defaultCategoryName)
                 == .orderedSame

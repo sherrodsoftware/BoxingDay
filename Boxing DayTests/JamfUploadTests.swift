@@ -3,6 +3,20 @@ import XCTest
 @testable import Boxing_Day
 
 final class JamfUploadTests: XCTestCase {
+    func testUploadProgressIsReportedInWholePercents() {
+        XCTAssertEqual(JamfClient.wholePercent(of: 0), 0)
+        XCTAssertEqual(JamfClient.wholePercent(of: 0.4249), 0.42)
+        XCTAssertEqual(JamfClient.wholePercent(of: 0.999), 0.99)
+        XCTAssertEqual(JamfClient.wholePercent(of: 1), 1)
+        XCTAssertEqual(JamfClient.wholePercent(of: 1.5), 1, "Clamped to complete")
+        XCTAssertEqual(JamfClient.wholePercent(of: -0.2), 0, "Clamped to none")
+        XCTAssertEqual(JamfClient.wholePercent(of: .nan), 0)
+        XCTAssertEqual(JamfClient.wholePercent(of: .infinity), 0)
+        // Small changes within the same percent produce the same value,
+        // which is what lets the client skip repeated reports.
+        XCTAssertEqual(JamfClient.wholePercent(of: 0.501), JamfClient.wholePercent(of: 0.509))
+    }
+
     func testValidatesUploadMetadata() {
         let valid = JamfPackageUploadOptions(
             packageName: "Example App",

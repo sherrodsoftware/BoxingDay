@@ -126,18 +126,17 @@ nonisolated struct JamfClient {
     let clientSecret: String
     var session: URLSession = .shared
 
-    static func cleanupAbandonedUploadBodies() {
+    /// Pass `temporaryItemNames` to reuse one listing of the temporary
+    /// directory across cleanups; otherwise it's listed here.
+    static func cleanupAbandonedUploadBodies(
+        temporaryItemNames: [String]? = nil
+    ) {
         let fileManager = FileManager.default
-        guard let contents = try? fileManager.contentsOfDirectory(
-            at: fileManager.temporaryDirectory,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else {
-            return
-        }
+        let names = temporaryItemNames ?? AppResolver.temporaryDirectoryNames()
 
         let currentPID = ProcessInfo.processInfo.processIdentifier
-        for candidate in contents {
+        for name in names where name.hasPrefix("BoxingDayUpload-") {
+            let candidate = fileManager.temporaryDirectory.appendingPathComponent(name)
             guard let ownerPID = uploadBodyOwnerPID(candidate),
                   ownerPID != currentPID,
                   !AppResolver.processIsRunning(ownerPID) else {
@@ -568,17 +567,28 @@ nonisolated struct JamfClient {
             task.resume()
 
             Task {
+                // Report only when the whole percentage changes, so a large
+                // upload sends at most about 100 updates rather than five a
+                // second for its whole duration.
+                var lastReported: Double?
                 while task.state == .running {
-                    let fraction = task.progress.fractionCompleted
-                    await progressChanged(
-                        fraction.isFinite
-                            ? min(max(fraction, 0), 1)
-                            : 0
-                    )
+                    let progress = Self.wholePercent(of: task.progress.fractionCompleted)
+                    if progress != lastReported {
+                        lastReported = progress
+                        await progressChanged(progress)
+                    }
                     try? await Task.sleep(for: .milliseconds(200))
                 }
             }
         }
+    }
+
+    /// Clamps a progress fraction to 0...1 and rounds it down to a whole
+    /// percent, treating NaN or infinity as no progress.
+    nonisolated static func wholePercent(of fraction: Double) -> Double {
+        guard fraction.isFinite else { return 0 }
+        let clamped = min(max(fraction, 0), 1)
+        return (clamped * 100).rounded(.down) / 100
     }
 
     nonisolated private static func createMultipartBody(

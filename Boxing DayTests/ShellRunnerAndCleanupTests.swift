@@ -98,6 +98,49 @@ final class TemporaryCleanupTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.path))
     }
 
+    func testSharedListingRemovesOnlyAbandonedBoxingDayItems() throws {
+        let fileManager = FileManager.default
+        let temp = fileManager.temporaryDirectory
+        let abandonedPID: Int32 = 2_000_000_000
+        let unique = UUID().uuidString
+
+        let abandonedWorkspace = try createManagedWorkspace(processID: abandonedPID)
+        let abandonedUpload = temp.appendingPathComponent(
+            "BoxingDayUpload-\(abandonedPID)-\(unique).multipart"
+        )
+        let activeUpload = temp.appendingPathComponent(
+            "BoxingDayUpload-\(ProcessInfo.processInfo.processIdentifier)-\(unique).multipart"
+        )
+        // Another app's items with similar names must never be touched.
+        let otherAppFile = temp.appendingPathComponent("OtherApp-\(abandonedPID)-\(unique)")
+        for url in [abandonedUpload, activeUpload, otherAppFile] {
+            XCTAssertTrue(fileManager.createFile(atPath: url.path, contents: Data()))
+        }
+        defer {
+            for url in [activeUpload, otherAppFile] {
+                try? fileManager.removeItem(at: url)
+            }
+        }
+
+        let names = AppResolver.temporaryDirectoryNames()
+        XCTAssertTrue(names.contains(abandonedWorkspace.lastPathComponent))
+        AppResolver.cleanupAbandonedWorkDirs(temporaryItemNames: names)
+        JamfClient.cleanupAbandonedUploadBodies(temporaryItemNames: names)
+
+        XCTAssertFalse(fileManager.fileExists(atPath: abandonedWorkspace.path))
+        XCTAssertFalse(fileManager.fileExists(atPath: abandonedUpload.path))
+        XCTAssertTrue(fileManager.fileExists(atPath: activeUpload.path), "Owned by a running process")
+        XCTAssertTrue(fileManager.fileExists(atPath: otherAppFile.path), "Not Boxing Day's")
+    }
+
+    func testCleanupWithoutAListingStillFindsAbandonedItems() throws {
+        let directory = try createManagedWorkspace(processID: 2_000_000_001)
+
+        AppResolver.cleanupAbandonedWorkDirs(temporaryItemNames: nil)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
     func testCleanupRefusesUnmanagedDirectory() throws {
         let fixture = try TestWorkspace()
 

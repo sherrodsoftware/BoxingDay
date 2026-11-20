@@ -26,10 +26,21 @@ struct UpdateCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
-            Button("Check for Updates…") {
-                updater.checkForUpdates()
-            }
-            .disabled(!availability.canCheckForUpdates)
+            CheckForUpdatesMenuItem(updater: updater, availability: availability)
         }
+    }
+}
+
+/// A View, so Observation tracks `canCheckForUpdates` and the item's enabled
+/// state follows Sparkle while a check is running.
+private struct CheckForUpdatesMenuItem: View {
+    let updater: SPUUpdater
+    let availability: UpdateAvailability
+
+    var body: some View {
+        Button("Check for Updates…") {
+            updater.checkForUpdates()
+        }
+        .disabled(!availability.canCheckForUpdates)
     }
 }

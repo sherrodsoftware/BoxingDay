@@ -2,16 +2,12 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+// Each section is its own View that reads only what it shows, so Observation
+// redraws just that section when the model changes. For example, typing in
+// Identifier redraws the package details, not the drop zone or status card.
+
 struct ContentView: View {
     @State private var model = PackagingModel()
-    @State private var isTargeted = false
-
-    private let acceptedTypes: [UTType] = [
-        .application,
-        .diskImage,
-        .zip,
-        UTType("com.apple.installer-package-archive") ?? .data
-    ]
 
     var body: some View {
         ScrollView {
@@ -24,17 +20,9 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                dropZone
-
-                if let selectedApp = model.selectedApp {
-                    selectedAppCard(selectedApp)
-                    optionsForm
-                } else if let selectedPackageURL = model.selectedPackageURL {
-                    selectedPackageCard(selectedPackageURL)
-                    existingPackageActions
-                }
-
-                statusView
+                DropZoneView(model: model)
+                SelectionSection(model: model)
+                StatusSection(model: model)
             }
             .frame(maxWidth: .infinity)
             .padding(24)
@@ -53,46 +41,61 @@ struct ContentView: View {
         ) { _ in
             model.tearDown()
         }
-        .focusedSceneValue(\.packageCommands, commandActions)
-        .onChange(of: model.status) { _, newStatus in
-            if let announcement = newStatus.accessibilityAnnouncement {
-                AccessibilityNotification.Announcement(announcement).post()
-            }
-        }
+        .focusedSceneValue(\.packagingModel, model)
+        .statusAnnouncements(model: model)
         .sheet(isPresented: $model.showingJamfUpload) {
-            if let uploadablePackageURL = model.uploadablePackageURL {
-                JamfUploadView(
-                    packageURL: uploadablePackageURL,
-                    suggestedFileName: model.selectedPackageSuggestedFileName
-                )
-            }
+            JamfUploadSheet(model: model)
         }
     }
+}
 
-    /// Menu bar actions for this window; a nil action disables its menu item.
-    private var commandActions: PackageCommandActions {
-        guard !model.showingJamfUpload, !model.status.isWorking else {
-            return PackageCommandActions()
-        }
-        var actions = PackageCommandActions()
-        actions.chooseFile = { chooseFile() }
-        if model.canBuild {
-            actions.build = { buildPackage() }
-        }
-        if model.uploadablePackageURL != nil {
-            actions.upload = { model.showingJamfUpload = true }
-        }
-        if let url = model.completedPackageURL {
-            actions.reveal = {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
+// MARK: - Accessibility
+
+/// Announces status changes for VoiceOver. As a modifier, it keeps the
+/// status read out of ContentView's body.
+private struct StatusAnnouncements: ViewModifier {
+    let model: PackagingModel
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: model.status) { _, newStatus in
+                if let announcement = newStatus.accessibilityAnnouncement {
+                    AccessibilityNotification.Announcement(announcement).post()
+                }
             }
-        }
-        return actions
     }
+}
 
-    // MARK: - File selection
+private extension View {
+    func statusAnnouncements(model: PackagingModel) -> some View {
+        modifier(StatusAnnouncements(model: model))
+    }
+}
 
-    private var dropZone: some View {
+// MARK: - Upload sheet
+
+private struct JamfUploadSheet: View {
+    let model: PackagingModel
+
+    var body: some View {
+        if let uploadablePackageURL = model.uploadablePackageURL {
+            JamfUploadView(
+                packageURL: uploadablePackageURL,
+                suggestedFileName: model.selectedPackageSuggestedFileName
+            )
+        }
+    }
+}
+
+// MARK: - File selection
+
+private struct DropZoneView: View {
+    let model: PackagingModel
+    @State private var isTargeted = false
+
+    var body: some View {
+        let isWorking = model.status.isWorking
+
         ZStack {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(
@@ -118,10 +121,10 @@ struct ContentView: View {
                 Text("Drop a .app, .dmg, .zip, or .pkg here")
                     .foregroundStyle(.secondary)
                 Button("Choose File…") {
-                    chooseFile()
+                    model.chooseFile()
                 }
                 .buttonStyle(.bordered)
-                .disabled(model.status.isWorking)
+                .disabled(isWorking)
             }
         }
         .frame(height: 160)
@@ -129,15 +132,54 @@ struct ContentView: View {
             handleDrop(providers: providers)
             return !model.status.isWorking
         }
-        .allowsHitTesting(!model.status.isWorking)
+        .allowsHitTesting(!isWorking)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Drop zone for an app, disk image, ZIP archive, or package")
         .accessibilityAction(named: "Choose File") {
-            chooseFile()
+            model.chooseFile()
         }
     }
 
-    private func selectedAppCard(_ app: SelectedAppDetails) -> some View {
+    private func handleDrop(providers: [NSItemProvider]) {
+        guard !model.status.isWorking, let provider = providers.first else { return }
+
+        _ = provider.loadDataRepresentation(
+            for: .fileURL
+        ) { data, error in
+            let url = data.flatMap { URL(dataRepresentation: $0, relativeTo: nil) }
+            let message = error?.localizedDescription
+            Task { @MainActor in
+                if let url {
+                    await model.resolveSelectedFile(at: url)
+                } else {
+                    model.status = .failure(
+                        message ?? "The dropped file could not be read."
+                    )
+                }
+            }
+        }
+    }
+}
+
+/// Shows the selected app and its package details, or the selected package.
+private struct SelectionSection: View {
+    let model: PackagingModel
+
+    var body: some View {
+        if let selectedApp = model.selectedApp {
+            SelectedAppCard(app: selectedApp)
+            PackageDetailsForm(model: model)
+        } else if let selectedPackageURL = model.selectedPackageURL {
+            SelectedPackageCard(packageURL: selectedPackageURL)
+            ExistingPackageActions(model: model)
+        }
+    }
+}
+
+private struct SelectedAppCard: View {
+    let app: SelectedAppDetails
+
+    var body: some View {
         HStack(spacing: 14) {
             Image(nsImage: app.icon)
                 .resizable()
@@ -175,8 +217,12 @@ struct ContentView: View {
                 .fill(.quinary)
         )
     }
+}
 
-    private func selectedPackageCard(_ packageURL: URL) -> some View {
+private struct SelectedPackageCard: View {
+    let packageURL: URL
+
+    var body: some View {
         HStack(spacing: 14) {
             Image(systemName: "shippingbox.fill")
                 .font(.system(size: 36))
@@ -199,10 +245,16 @@ struct ContentView: View {
                 .fill(.quinary)
         )
     }
+}
 
-    // MARK: - Options
+// MARK: - Package details
 
-    private var optionsForm: some View {
+private struct PackageDetailsForm: View {
+    @Bindable var model: PackagingModel
+
+    var body: some View {
+        let isWorking = model.status.isWorking
+
         VStack(alignment: .leading, spacing: 14) {
             Text("Package Details")
                 .font(.headline)
@@ -211,10 +263,10 @@ struct ContentView: View {
                 LabeledContent("Identifier") {
                     TextField("com.example.app.pkg", text: $model.identifier)
                         .textFieldStyle(.roundedBorder)
-                        .disabled(model.status.isWorking)
+                        .disabled(isWorking)
                 }
                 if let identifierError = model.identifierError {
-                    validationMessage(identifierError)
+                    ValidationMessage(message: identifierError)
                 }
             }
 
@@ -222,10 +274,10 @@ struct ContentView: View {
                 LabeledContent("Version") {
                     TextField("1.0", text: $model.version)
                         .textFieldStyle(.roundedBorder)
-                        .disabled(model.status.isWorking)
+                        .disabled(isWorking)
                 }
                 if let versionError = model.versionError {
-                    validationMessage(versionError)
+                    ValidationMessage(message: versionError)
                 }
             }
 
@@ -235,7 +287,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button(buildButtonTitle) {
-                    buildPackage()
+                    model.chooseBuildDestination()
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -249,7 +301,22 @@ struct ContentView: View {
         )
     }
 
-    private var existingPackageActions: some View {
+    private var buildButtonTitle: String {
+        switch model.status {
+        case .success:
+            return "Build Again…"
+        case .failure:
+            return "Retry Build…"
+        default:
+            return "Build .pkg…"
+        }
+    }
+}
+
+private struct ExistingPackageActions: View {
+    let model: PackagingModel
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Package Details")
                 .font(.headline)
@@ -260,7 +327,7 @@ struct ContentView: View {
             HStack {
                 Spacer()
                 Button("Upload to Jamf Pro…") {
-                    model.showingJamfUpload = true
+                    model.presentUpload()
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -272,81 +339,56 @@ struct ContentView: View {
                 .stroke(.separator)
         )
     }
+}
 
-    private func validationMessage(_ message: String) -> some View {
+private struct ValidationMessage: View {
+    let message: String
+
+    var body: some View {
         Label(message, systemImage: "exclamationmark.circle.fill")
             .font(.caption)
             .foregroundStyle(.red)
             .fixedSize(horizontal: false, vertical: true)
     }
+}
 
-    private var buildButtonTitle: String {
-        switch model.status {
-        case .success:
-            return "Build Again…"
-        case .failure:
-            return "Retry Build…"
-        default:
-            return "Build .pkg…"
-        }
-    }
+// MARK: - Status
 
-    // MARK: - Status
+private struct StatusSection: View {
+    let model: PackagingModel
 
-    @ViewBuilder
-    private var statusView: some View {
+    var body: some View {
         switch model.status {
         case .idle:
             EmptyView()
         case .resolving(let name):
-            progressCard("Reading \(name)…")
+            ProgressCard(message: "Reading \(name)…", model: nil)
         case .building(let name):
-            progressCard("Building package for \(name)…") {
-                model.cancelBuild()
-            }
+            ProgressCard(message: "Building package for \(name)…", model: model)
         case .success(let details):
-            completionCard(details)
+            CompletionCard(details: details, model: model)
         case .failure(let message):
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(message)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Button("Copy Error") {
-                            ErrorReportExporter.copy(message: message)
-                        }
-                        Button("Save Error as Text…") {
-                            ErrorReportExporter.save(
-                                message: message,
-                                suggestedFileName: "Boxing Day Build Error.txt"
-                            )
-                        }
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.red.opacity(0.08))
-            )
+            FailureCard(message: message)
         }
     }
+}
 
-    private func progressCard(
-        _ message: String,
-        cancel: (() -> Void)? = nil
-    ) -> some View {
+/// Shows work in progress. Pass the model to offer Cancel for a build.
+private struct ProgressCard: View {
+    let message: String
+    let model: PackagingModel?
+
+    var body: some View {
         HStack(spacing: 10) {
             ProgressView()
                 .controlSize(.small)
             Text(message)
             Spacer(minLength: 0)
-            if let cancel {
-                Button("Cancel", action: cancel)
-                    .keyboardShortcut(.cancelAction)
+            if let model {
+                Button("Cancel") {
+                    model.cancelBuild()
+                }
+                .keyboardShortcut(.cancelAction)
             }
         }
         .padding(14)
@@ -355,23 +397,60 @@ struct ContentView: View {
                 .fill(Color.accentColor.opacity(0.08))
         )
     }
+}
 
-    private func completionCard(_ details: PackageCompletionDetails) -> some View {
+private struct FailureCard: View {
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(message)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Copy Error") {
+                        ErrorReportExporter.copy(message: message)
+                    }
+                    Button("Save Error as Text…") {
+                        ErrorReportExporter.save(
+                            message: message,
+                            suggestedFileName: "Boxing Day Build Error.txt"
+                        )
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.red.opacity(0.08))
+        )
+    }
+}
+
+private struct CompletionCard: View {
+    let details: PackageCompletionDetails
+    let model: PackagingModel
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Package created successfully", systemImage: "checkmark.circle.fill")
                 .font(.headline)
                 .foregroundStyle(.green)
 
             VStack(alignment: .leading, spacing: 6) {
-                completionRow("File", details.url.lastPathComponent)
-                completionRow("Saved to", details.url.deletingLastPathComponent().path)
-                completionRow("Identifier", details.identifier)
-                completionRow("Version", details.version)
-                completionRow("Install location", details.installLocation)
+                CompletionRow(label: "File", value: details.url.lastPathComponent)
+                CompletionRow(label: "Saved to", value: details.url.deletingLastPathComponent().path)
+                CompletionRow(label: "Identifier", value: details.identifier)
+                CompletionRow(label: "Version", value: details.version)
+                CompletionRow(label: "Install location", value: details.installLocation)
                 if let fileSize = details.fileSize {
-                    completionRow(
-                        "Package size",
-                        ByteCountFormatter.string(
+                    CompletionRow(
+                        label: "Package size",
+                        value: ByteCountFormatter.string(
                             fromByteCount: fileSize,
                             countStyle: .file
                         )
@@ -391,11 +470,11 @@ struct ContentView: View {
 
             HStack {
                 Button("Reveal in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([details.url])
+                    model.revealCompletedPackage()
                 }
 
                 Button("Upload to Jamf Pro…") {
-                    model.showingJamfUpload = true
+                    model.presentUpload()
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -407,8 +486,13 @@ struct ContentView: View {
                 .fill(Color.green.opacity(0.08))
         )
     }
+}
 
-    private func completionRow(_ label: String, _ value: String) -> some View {
+private struct CompletionRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
         LabeledContent(label) {
             Text(value)
                 .foregroundStyle(.secondary)
@@ -418,60 +502,6 @@ struct ContentView: View {
                 .help(value)
         }
         .font(.caption)
-    }
-
-    // MARK: - Actions
-
-    private func chooseFile() {
-        guard !model.status.isWorking else { return }
-
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = acceptedTypes
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.treatsFilePackagesAsDirectories = false
-        panel.message = "Choose a .app, .dmg, .zip, or .pkg file."
-        panel.prompt = "Choose"
-
-        panel.presentAttachedToKeyWindow { url in
-            Task { await model.resolveSelectedFile(at: url) }
-        }
-    }
-
-    private func handleDrop(providers: [NSItemProvider]) {
-        guard !model.status.isWorking, let provider = providers.first else { return }
-
-        _ = provider.loadDataRepresentation(
-            for: .fileURL
-        ) { data, error in
-            let url = data.flatMap { URL(dataRepresentation: $0, relativeTo: nil) }
-            let message = error?.localizedDescription
-            Task { @MainActor in
-                if let url {
-                    await model.resolveSelectedFile(at: url)
-                } else {
-                    model.status = .failure(
-                        message ?? "The dropped file could not be read."
-                    )
-                }
-            }
-        }
-    }
-
-    private func buildPackage() {
-        guard model.canBuild else { return }
-
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [
-            UTType("com.apple.installer-package-archive") ?? .data
-        ]
-        panel.nameFieldStringValue = model.suggestedPackageFileName ?? ""
-        panel.directoryURL = model.preferredPackageSaveDirectory()
-
-        panel.presentAttachedToKeyWindow { outputURL in
-            Task { await model.build(to: outputURL) }
-        }
     }
 }
 
